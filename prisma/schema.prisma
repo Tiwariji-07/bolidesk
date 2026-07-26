@@ -38,6 +38,7 @@ model Workspace {
   invoices      Invoice[]
   followUps     FollowUp[]
   activities    Activity[]
+  paymentRequests PaymentRequest[]
   createdAt     DateTime   @default(now())
 }
 
@@ -53,6 +54,7 @@ model Customer {
   quotes      Quote[]
   invoices    Invoice[]
   createdAt   DateTime  @default(now())
+  @@index([workspaceId, createdAt])
   @@unique([workspaceId, phone])
 }
 
@@ -64,7 +66,9 @@ model Job {
   customer    Customer? @relation(fields: [customerId], references: [id])
   note        String
   parsedJson  Json?
+  quote       Quote?
   createdAt   DateTime  @default(now())
+  @@index([workspaceId, createdAt])
 }
 
 model Quote {
@@ -73,6 +77,8 @@ model Quote {
   workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   customerId  String
   customer    Customer    @relation(fields: [customerId], references: [id])
+  jobId       String?     @unique
+  job         Job?        @relation(fields: [jobId], references: [id])
   number      String
   status      QuoteStatus @default(DRAFT)
   subtotal    Int
@@ -83,6 +89,7 @@ model Quote {
   createdAt   DateTime    @default(now())
   invoice     Invoice?
   @@unique([workspaceId, number])
+  @@index([workspaceId, status])
 }
 
 model Invoice {
@@ -102,8 +109,10 @@ model Invoice {
   dueDate     DateTime?
   linesJson   Json
   paymentUrl  String?
+  paymentRequests PaymentRequest[]
   createdAt   DateTime      @default(now())
   @@unique([workspaceId, number])
+  @@index([workspaceId, status])
 }
 
 model FollowUp {
@@ -116,6 +125,7 @@ model FollowUp {
   dueAt       DateTime
   snoozedUntil DateTime?
   createdAt   DateTime       @default(now())
+  @@index([workspaceId, status, dueAt])
 }
 
 model Activity {
@@ -124,4 +134,18 @@ model Activity {
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   body        String
   createdAt   DateTime  @default(now())
+  @@index([workspaceId, createdAt])
+}
+
+model PaymentRequest {
+  id          String   @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invoiceId   String
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  reference   String   @unique
+  amount      Int
+  url         String
+  createdAt   DateTime @default(now())
+  @@index([workspaceId, invoiceId])
 }
