@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+}
+
+enum FollowUpStatus {
+  OPEN
+  SNOOZED
+  DONE
+}
+
+model Workspace {
+  id            String     @id @default(cuid())
+  name          String
+  brandName     String
+  invoicePrefix String     @default("BD")
+  gstin         String?
+  customers     Customer[]
+  jobs          Job[]
+  quotes        Quote[]
+  invoices      Invoice[]
+  followUps     FollowUp[]
+  activities    Activity[]
+  createdAt     DateTime   @default(now())
+}
+
+model Customer {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  phone       String
+  email       String?
+  address     String?
+  jobs        Job[]
+  quotes      Quote[]
+  invoices    Invoice[]
+  createdAt   DateTime  @default(now())
+  @@unique([workspaceId, phone])
+}
+
+model Job {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id])
+  note        String
+  parsedJson  Json?
+  createdAt   DateTime  @default(now())
+}
+
+model Quote {
+  id          String      @id @default(cuid())
+  workspaceId String
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  number      String
+  status      QuoteStatus @default(DRAFT)
+  subtotal    Int
+  tax         Int
+  total       Int
+  linesJson   Json
+  dueDate     DateTime?
+  createdAt   DateTime    @default(now())
+  invoice     Invoice?
+  @@unique([workspaceId, number])
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  workspaceId String
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer      @relation(fields: [customerId], references: [id])
+  quoteId     String?       @unique
+  quote       Quote?        @relation(fields: [quoteId], references: [id])
+  number      String
+  status      InvoiceStatus @default(DRAFT)
+  subtotal    Int
+  tax         Int
+  total       Int
+  paidAt      DateTime?
+  dueDate     DateTime?
+  linesJson   Json
+  paymentUrl  String?
+  createdAt   DateTime      @default(now())
+  @@unique([workspaceId, number])
+}
+
+model FollowUp {
+  id          String         @id @default(cuid())
+  workspaceId String
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  subject     String
+  action      String
+  status      FollowUpStatus @default(OPEN)
+  dueAt       DateTime
+  snoozedUntil DateTime?
+  createdAt   DateTime       @default(now())
+}
+
+model Activity {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  body        String
+  createdAt   DateTime  @default(now())
+}
