@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { hashPassword } from "../src/server/auth";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL is required to seed BoliDesk.");
@@ -14,6 +15,20 @@ async function main() {
     where: { id: workspaceId },
     update: { name: "CoolCare Services", brandName: "CoolCare Services", invoicePrefix: "BD", gstin: "29AAAAA0000A1Z5" },
     create: { id: workspaceId, name: "CoolCare Services", brandName: "CoolCare Services", invoicePrefix: "BD", gstin: "29AAAAA0000A1Z5" },
+  });
+
+  const demoEmail = (process.env.DEMO_USER_EMAIL || "demo@bolidesk.local").trim().toLowerCase();
+  const demoPassword = process.env.DEMO_USER_PASSWORD;
+  if (!demoPassword || demoPassword.length < 12) throw new Error("DEMO_USER_PASSWORD must be set to at least 12 characters before seeding.");
+  const demoUser = await prisma.user.upsert({
+    where: { email: demoEmail },
+    update: { passwordHash: await hashPassword(demoPassword) },
+    create: { email: demoEmail, passwordHash: await hashPassword(demoPassword) },
+  });
+  await prisma.membership.upsert({
+    where: { userId_workspaceId: { userId: demoUser.id, workspaceId } },
+    update: { role: "OWNER" },
+    create: { userId: demoUser.id, workspaceId, role: "OWNER" },
   });
 
   const ravi = await prisma.customer.upsert({

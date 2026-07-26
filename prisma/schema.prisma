@@ -40,12 +40,42 @@ enum DeliveryStatus {
   FAILED
 }
 
+enum MembershipRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id           String       @id @default(cuid())
+  email        String       @unique
+  passwordHash String
+  memberships  Membership[]
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Membership {
+  id          String         @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        MembershipRole @default(MEMBER)
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@unique([userId, workspaceId])
+  @@index([workspaceId, role])
+}
+
 model Workspace {
   id            String     @id @default(cuid())
   name          String
   brandName     String
   invoicePrefix String     @default("BD")
   gstin         String?
+  memberships   Membership[]
   customers     Customer[]
   jobs          Job[]
   quotes        Quote[]

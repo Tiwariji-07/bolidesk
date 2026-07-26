@@ -1,6 +1,6 @@
 # BoliDesk
 
-BoliDesk is a local-first demo workspace for Indian service businesses. It turns a WhatsApp-style job note into a reviewed quote, invoice, payment request, and practical follow-up list.
+BoliDesk is a multi-tenant, local-first SaaS workspace for Indian service businesses. It turns a WhatsApp-style job note into a reviewed quote, invoice, payment request, and practical follow-up list. Every application request is scoped to the signed-in user's workspace membership; a workspace is never selected from browser input.
 
 The app starts in safe demo mode: data shown in the interface is sample data, payment links resolve to a local customer portal, and no external API call is made. Set `DEMO_MODE=false` only after the production credentials below are present and pass `npm run env:check`.
 
@@ -10,13 +10,14 @@ Prerequisites: Node.js 22+, Docker Desktop, and npm.
 
 ```bash
 cp .env.example .env
+# Set SESSION_SECRET and DEMO_USER_PASSWORD to distinct local random values (both are required; do not commit them).
 docker compose up -d db
 npm ci
 npm run db:setup
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The database commands are idempotent, so `npm run db:setup` can be repeated after a schema change. `npm run db:reset` drops and recreates the local database, then reruns the seed script.
+Open [http://localhost:3000](http://localhost:3000) and sign in with the seeded demo email (`DEMO_USER_EMAIL`, which defaults to `demo@bolidesk.local`) and the private `DEMO_USER_PASSWORD` you set in `.env`. The password is intentionally never committed or printed by setup commands. You can instead create a separate workspace from `/register`. The database commands are idempotent, so `npm run db:setup` can be repeated after a schema change. `npm run db:reset` drops and recreates the local database, then reruns the seed script.
 
 To run the full stack in containers, including migrations and demo data:
 
@@ -57,6 +58,9 @@ Copy `.env.example` to `.env`. `DATABASE_URL` is required by Prisma and points a
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | Always | PostgreSQL connection string. |
+| `SESSION_SECRET` | Always | Random 32+ character server secret used to sign httpOnly sessions. |
+| `DEMO_USER_EMAIL` | Demo seed | Seed account email (defaults to `demo@bolidesk.local`). |
+| `DEMO_USER_PASSWORD` | Demo seed | Private 12+ character password used only to bcrypt-hash the seed account. Never commit or print it. |
 | `DEMO_MODE` | Always | Keep `true` to force non-network demo providers; set `false` for live adapters. |
 | `APP_URL` | Live mode | Public HTTPS application origin, used for customer portal callback URLs. |
 | `AI_PROVIDER` | Live mode | Must be `openai`. |

@@ -1,9 +1,20 @@
+import { redirect } from "next/navigation";
 import { getPrisma } from "./prisma";
+import { sessionUserId } from "./session";
 
-/** The only current demo auth boundary; replace this resolver when real auth ships. */
+export async function currentMembership() {
+  const userId = await sessionUserId();
+  if (!userId) redirect("/login");
+  const membership = await getPrisma().membership.findFirst({
+    where: { userId },
+    orderBy: { createdAt: "asc" },
+    select: { workspaceId: true, role: true, workspace: { select: { name: true } } },
+  });
+  if (!membership) redirect("/login?error=no-workspace");
+  return membership;
+}
+
+/** Workspace identity is derived exclusively from the signed session's database membership. */
 export async function currentWorkspaceId() {
-  const id = process.env.DEMO_WORKSPACE_ID || "demo-workspace";
-  const workspace = await getPrisma().workspace.findFirst({ where: { id }, select: { id: true } });
-  if (!workspace) throw new Error("Demo workspace is missing. Run npm run db:setup.");
-  return workspace.id;
+  return (await currentMembership()).workspaceId;
 }
