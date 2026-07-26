@@ -34,6 +34,7 @@ services:
     environment:
       DATABASE_URL: postgresql://bolidesk:bolidesk@db:5432/bolidesk?schema=public
       DEMO_MODE: "true"
+      APP_URL: http://localhost:3000
     depends_on:
       migrate:
         condition: service_completed_successfully

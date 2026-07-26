@@ -26,6 +26,20 @@ enum FollowUpStatus {
   DONE
 }
 
+enum PaymentProvider {
+  DEMO
+  RAZORPAY
+}
+
+enum DeliveryChannel {
+  WHATSAPP
+}
+
+enum DeliveryStatus {
+  SENT
+  FAILED
+}
+
 model Workspace {
   id            String     @id @default(cuid())
   name          String
@@ -39,6 +53,8 @@ model Workspace {
   followUps     FollowUp[]
   activities    Activity[]
   paymentRequests PaymentRequest[]
+  deliveryLogs  DeliveryLog[]
+  portalTokens  CustomerPortalToken[]
   createdAt     DateTime   @default(now())
 }
 
@@ -53,6 +69,8 @@ model Customer {
   jobs        Job[]
   quotes      Quote[]
   invoices    Invoice[]
+  portalTokens CustomerPortalToken[]
+  deliveryLogs DeliveryLog[]
   createdAt   DateTime  @default(now())
   @@index([workspaceId, createdAt])
   @@unique([workspaceId, phone])
@@ -88,6 +106,7 @@ model Quote {
   dueDate     DateTime?
   createdAt   DateTime    @default(now())
   invoice     Invoice?
+  portalTokens CustomerPortalToken[]
   @@unique([workspaceId, number])
   @@index([workspaceId, status])
 }
@@ -110,6 +129,8 @@ model Invoice {
   linesJson   Json
   paymentUrl  String?
   paymentRequests PaymentRequest[]
+  deliveryLogs DeliveryLog[]
+  portalTokens CustomerPortalToken[]
   createdAt   DateTime      @default(now())
   @@unique([workspaceId, number])
   @@index([workspaceId, status])
@@ -144,8 +165,52 @@ model PaymentRequest {
   invoiceId   String
   invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   reference   String   @unique
+  provider    PaymentProvider @default(DEMO)
+  providerPaymentLinkId String? @unique
   amount      Int
   url         String
   createdAt   DateTime @default(now())
   @@index([workspaceId, invoiceId])
+}
+
+model DeliveryLog {
+  id          String         @id @default(cuid())
+  workspaceId String
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customerId  String?
+  customer    Customer?      @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  invoiceId   String?
+  invoice     Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  channel     DeliveryChannel
+  provider    String
+  recipient   String
+  template    String?
+  payloadJson Json
+  status      DeliveryStatus
+  providerMessageId String?
+  error       String?
+  createdAt   DateTime       @default(now())
+  sentAt      DateTime?
+  @@index([workspaceId, createdAt])
+  @@index([invoiceId, createdAt])
+}
+
+model CustomerPortalToken {
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  customerId  String
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  invoiceId   String?
+  invoice     Invoice?  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  quoteId     String?
+  quote       Quote?    @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  lastAccessedAt DateTime?
+  createdAt   DateTime  @default(now())
+  @@index([workspaceId, customerId])
+  @@index([invoiceId])
+  @@index([quoteId])
 }

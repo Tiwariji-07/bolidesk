@@ -1,14 +1,21 @@
 import { Prisma, PrismaClient, QuoteStatus } from "@prisma/client";
 import { canTransitionInvoice } from "../domain/invoice";
 import { localJobNoteParser } from "../domain/job-note";
+import type { ParsedJobNote } from "../domain/job-note";
 import { calculateQuoteTotals, type QuoteLine } from "../domain/quote";
 import { getPrisma } from "./prisma";
+import { hashPortalToken, newPortalToken } from "./portal";
+import { publicAppUrl } from "./env";
+import { createProviders } from "./integrations/providers";
+import type { PaymentProvider } from "./integrations/types";
 
 type Database = PrismaClient | Prisma.TransactionClient;
 type CustomerInput = { name: string; phone: string; email?: string; address?: string };
 type WorkspaceSettingsInput = { brandName: string; invoicePrefix: string; gstin?: string };
 type JobInput = { note: string; customerId?: string };
+type SavedJobParser = { parse(note: string): ParsedJobNote | Promise<ParsedJobNote> };
 type FollowUpInput = { subject: string; action: string; dueAt: Date };
+type PaymentRequestOptions = { paymentProvider?: PaymentProvider; appUrl?: string };
 
 const asJson = (value: unknown) => value as Prisma.InputJsonValue;
 
@@ -56,12 +63,12 @@ function jobRepository(db: Database, workspaceId: string) {
   return {
     list: () => db.job.findMany({ where: { workspaceId }, include: { customer: true, quote: true }, orderBy: { createdAt: "desc" } }),
     get: (id: string) => db.job.findFirst({ where: { id, workspaceId }, include: { customer: true } }),
-    async parseAndSave(input: JobInput) {
+    async parseAndSave(input: JobInput, parser: SavedJobParser = localJobNoteParser) {
       if (input.customerId) {
         const customer = await db.customer.findFirst({ where: { id: input.customerId, workspaceId } });
         if (!customer) throw new Error("Customer not found");
       }
-      const parsed = localJobNoteParser.parse(input.note);
+      const parsed = await parser.parse(input.note);
       const job = await db.job.create({ data: { workspaceId, customerId: input.customerId, note: input.note, parsedJson: asJson(parsed) } });
       await activityRepository(db, workspaceId).create("Job note parsed and saved");
       return { job, parsed };
@@ -127,16 +134,22 @@ function invoiceRepository(db: Database, workspaceId: string) {
         return invoice;
       });
     },
-    async createPaymentRequest(invoiceId: string) {
+    async createPaymentRequest(invoiceId: string, options: PaymentRequestOptions = {}) {
+      const existing = await db.paymentRequest.findFirst({ where: { invoiceId, workspaceId }, orderBy: { createdAt: "desc" } });
+      if (existing) return existing;
+      const invoice = await db.invoice.findFirst({ where: { id: invoiceId, workspaceId }, include: { customer: true } });
+      if (!invoice) throw new Error("Invoice not found");
+      const reference = `PR-${invoice.number}-${Date.now().toString(36).toUpperCase()}`;
+      const token = newPortalToken();
+      const portalUrl = `${options.appUrl ?? publicAppUrl()}/p/${token}`;
+      const paymentProvider = options.paymentProvider ?? createProviders().payments;
+      const link = await paymentProvider.createPaymentLink({ reference, amount: invoice.total, description: `Invoice ${invoice.number}`, customerName: invoice.customer.name, customerPhone: invoice.customer.phone, callbackUrl: portalUrl });
       return (db as PrismaClient).$transaction(async (tx) => {
-        const invoice = await tx.invoice.findFirst({ where: { id: invoiceId, workspaceId } });
-        if (!invoice) throw new Error("Invoice not found");
-        const existing = await tx.paymentRequest.findFirst({ where: { invoiceId: invoice.id, workspaceId }, orderBy: { createdAt: "desc" } });
-        if (existing) return existing;
-        const reference = `PR-${invoice.number}-${Date.now().toString(36).toUpperCase()}`;
-        const url = `/invoices/${encodeURIComponent(invoice.number)}?payment=${reference}`;
-        const request = await tx.paymentRequest.create({ data: { workspaceId, invoiceId: invoice.id, reference, amount: invoice.total, url } });
-        await tx.invoice.updateMany({ where: { id: invoice.id, workspaceId }, data: { paymentUrl: url, status: invoice.status === "DRAFT" ? "SENT" : invoice.status } });
+        const raced = await tx.paymentRequest.findFirst({ where: { invoiceId: invoice.id, workspaceId }, orderBy: { createdAt: "desc" } });
+        if (raced) return raced;
+        await tx.customerPortalToken.create({ data: { workspaceId, customerId: invoice.customerId, invoiceId: invoice.id, tokenHash: hashPortalToken(token), expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) } });
+        const request = await tx.paymentRequest.create({ data: { workspaceId, invoiceId: invoice.id, reference, amount: invoice.total, url: link.url, provider: paymentProvider.name === "razorpay" ? "RAZORPAY" : "DEMO", providerPaymentLinkId: link.id } });
+        await tx.invoice.updateMany({ where: { id: invoice.id, workspaceId }, data: { paymentUrl: link.url, status: invoice.status === "DRAFT" ? "SENT" : invoice.status } });
         await tx.activity.create({ data: { workspaceId, body: `Payment request prepared for ${invoice.number}` } });
         return request;
       });
@@ -145,13 +158,35 @@ function invoiceRepository(db: Database, workspaceId: string) {
       return (db as PrismaClient).$transaction(async (tx) => {
         const invoice = await tx.invoice.findFirst({ where: { id: invoiceId, workspaceId } });
         if (!invoice) throw new Error("Invoice not found");
-        if (invoice.status !== "PAID" && !canTransitionInvoice(invoice.status, "PAID")) throw new Error("Invoice cannot be marked paid from its current status");
+        if (invoice.status === "PAID") return invoice;
+        if (!canTransitionInvoice(invoice.status, "PAID")) throw new Error("Invoice cannot be marked paid from its current status");
         const result = await tx.invoice.updateMany({ where: { id: invoiceId, workspaceId }, data: { status: "PAID", paidAt: new Date() } });
         if (result.count !== 1) throw new Error("Invoice not found");
         const paid = await tx.invoice.findFirstOrThrow({ where: { id: invoiceId, workspaceId } });
         await tx.activity.create({ data: { workspaceId, body: `Invoice ${paid.number} marked paid` } });
         return paid;
       });
+    },
+  };
+}
+
+function portalTokenRepository(db: Database, workspaceId: string) {
+  const create = async (target: { customerId: string; invoiceId?: string; quoteId?: string }) => {
+    const token = newPortalToken();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await db.customerPortalToken.create({ data: { workspaceId, ...target, tokenHash: hashPortalToken(token), expiresAt } });
+    return { token, expiresAt, url: `${publicAppUrl()}/p/${token}` };
+  };
+  return {
+    async createForInvoice(invoiceId: string) {
+      const invoice = await db.invoice.findFirst({ where: { id: invoiceId, workspaceId } });
+      if (!invoice) throw new Error("Invoice not found");
+      return create({ customerId: invoice.customerId, invoiceId: invoice.id });
+    },
+    async createForQuote(quoteId: string) {
+      const quote = await db.quote.findFirst({ where: { id: quoteId, workspaceId } });
+      if (!quote) throw new Error("Quote not found");
+      return create({ customerId: quote.customerId, quoteId: quote.id });
     },
   };
 }
@@ -190,6 +225,7 @@ export function forWorkspace(workspaceId: string, db?: Database) {
     jobs: jobRepository(client, workspaceId),
     quotes: quoteRepository(client, workspaceId),
     invoices: invoiceRepository(client, workspaceId),
+    portalTokens: portalTokenRepository(client, workspaceId),
     followUps: followUpRepository(client, workspaceId),
     activities: activityRepository(client, workspaceId),
   };

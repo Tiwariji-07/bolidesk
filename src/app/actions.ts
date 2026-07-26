@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { currentWorkspaceId } from "@/server/current-workspace";
 import { forWorkspace } from "@/server/persistence";
+import { createProviders } from "@/server/integrations/providers";
 import { customerInputSchema, followUpInputSchema, jobInputSchema, quoteStatusSchema, workspaceSettingsSchema } from "@/server/validation";
 
 type Result<T = undefined> = { ok: true; data?: T } | { ok: false; error: string };
@@ -24,7 +25,7 @@ export async function updateCustomer(id: string, values: unknown): Promise<Resul
 export async function parseAndSaveJob(values: unknown): Promise<Result<{ id: string; parsed: unknown }>> {
   const input = jobInputSchema.safeParse(values);
   if (!input.success) return { ok: false, error: "Enter a job note between 8 and 2,000 characters." };
-  try { const { job, parsed } = await forWorkspace(await currentWorkspaceId()).jobs.parseAndSave(input.data); invalidate("/jobs", "/"); return { ok: true, data: { id: job.id, parsed } }; } catch (error) { return { ok: false, error: message(error) }; }
+  try { const { job, parsed } = await forWorkspace(await currentWorkspaceId()).jobs.parseAndSave(input.data, createProviders().jobParser); invalidate("/jobs", "/"); return { ok: true, data: { id: job.id, parsed } }; } catch (error) { return { ok: false, error: message(error) }; }
 }
 
 export async function createQuoteFromJob(jobId: string): Promise<Result<{ id: string }>> {
@@ -43,9 +44,14 @@ export async function convertQuoteToInvoice(quoteId: string): Promise<Result<{ n
   try { const invoice = await forWorkspace(await currentWorkspaceId()).invoices.convertAcceptedQuote(quoteId); invalidate("/invoices", "/quotes", "/"); return { ok: true, data: { number: invoice.number } }; } catch (error) { return { ok: false, error: message(error) }; }
 }
 
+export async function createQuotePortalLink(quoteId: string): Promise<Result<{ url: string }>> {
+  if (!quoteId) return { ok: false, error: "Quote is required." };
+  try { const portal = await forWorkspace(await currentWorkspaceId()).portalTokens.createForQuote(quoteId); return { ok: true, data: { url: portal.url } }; } catch (error) { return { ok: false, error: message(error) }; }
+}
+
 export async function createPaymentRequest(invoiceId: string): Promise<Result<{ url: string }>> {
   if (!invoiceId) return { ok: false, error: "Invoice is required." };
-  try { const request = await forWorkspace(await currentWorkspaceId()).invoices.createPaymentRequest(invoiceId); invalidate("/invoices", "/"); return { ok: true, data: { url: request.url } }; } catch (error) { return { ok: false, error: message(error) }; }
+  try { const request = await forWorkspace(await currentWorkspaceId()).invoices.createPaymentRequest(invoiceId, { paymentProvider: createProviders().payments }); invalidate("/invoices", "/"); return { ok: true, data: { url: request.url } }; } catch (error) { return { ok: false, error: message(error) }; }
 }
 
 export async function markInvoicePaid(invoiceId: string): Promise<Result> {
