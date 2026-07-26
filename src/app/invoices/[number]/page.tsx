@@ -1,12 +1,16 @@
-"use client";
-import { useParams } from "next/navigation";
-import { useState } from "react";
-import { invoices } from "@/lib/demo-data";
-import { formatINR, formatDate } from "@/lib/format";
+import { notFound } from "next/navigation";
+import { InvoiceActions } from "@/components/invoice-actions";
 import { PageHeader, Status } from "@/components/ui";
+import { formatDate, formatINR } from "@/lib/format";
+import { currentWorkspaceId } from "@/server/current-workspace";
+import { forWorkspace } from "@/server/persistence";
 
-export default function InvoiceDetailPage() {
-  const params = useParams<{ number: string }>(); const invoice = invoices.find((item) => item.number === params.number) ?? invoices[0]; const [status, setStatus] = useState(invoice.status); const [message, setMessage] = useState("");
-  async function paymentRequest() { const response = await fetch("/api/payment-requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ invoiceNumber: invoice.number, amount: invoice.total }) }); const body = await response.json(); setMessage(response.ok ? `Payment link ready: ${body.url}` : body.error); }
-  return <><PageHeader eyebrow="Invoice detail" title={invoice.number} action={<div className="form-actions no-print"><button className="secondary" onClick={() => window.print()}>Print</button>{status !== "PAID" && <button onClick={paymentRequest}>Create payment request</button>}</div>} />{message && <p className="notice">{message}</p>}<article className="invoice-paper"><div className="invoice-top"><div><p className="eyebrow">CoolCare Services</p><h2>Tax Invoice</h2><p className="muted">GSTIN: 29AAAAA0000A1Z5</p></div><div className="invoice-meta"><strong>{invoice.number}</strong><br />Issued 26 Jul 2026<br />Due {formatDate(invoice.due)}<br /><br /><Status value={status} /></div></div><div className="split" style={{ margin: "18px 0" }}><div><p className="eyebrow">Bill to</p><strong>{invoice.customer}</strong><br /><span className="muted">Bengaluru, Karnataka</span></div><div><p className="eyebrow">Payment terms</p><strong>Due on receipt</strong><br /><span className="muted">UPI / card / bank transfer</span></div></div><div className="data-list"><div className="row"><div><strong>{invoice.service}</strong><span>1 × service · GST 18%</span></div><strong>{formatINR(Math.round(invoice.total / 1.18))}</strong></div><div className="row"><span>GST</span><strong>{formatINR(invoice.total - Math.round(invoice.total / 1.18))}</strong></div></div><div className="invoice-total"><span>Total payable</span><span>{formatINR(invoice.total)}</span></div>{status !== "PAID" && <div className="form-actions no-print"><button onClick={() => { setStatus("PAID"); setMessage("Payment recorded in this demo."); }}>Record payment</button></div>}</article></>;
+type Line = { description: string; quantity: number; unitPrice: number; taxRate: number };
+export default async function InvoiceDetailPage({ params }: { params: Promise<{ number: string }> }) {
+  const { number } = await params;
+  const workspace = forWorkspace(await currentWorkspaceId());
+  const [invoice, settings] = await Promise.all([workspace.invoices.getByNumber(number), workspace.workspace.get()]);
+  if (!invoice || !settings) notFound();
+  const lines = invoice.linesJson as unknown as Line[];
+  return <><PageHeader eyebrow="Invoice detail" title={invoice.number} action={<InvoiceActions invoiceId={invoice.id} paid={invoice.status === "PAID"} />} /><article className="invoice-paper"><div className="invoice-top"><div><p className="eyebrow">{settings.brandName}</p><h2>Tax Invoice</h2>{settings.gstin && <p className="muted">GSTIN: {settings.gstin}</p>}</div><div className="invoice-meta"><strong>{invoice.number}</strong><br />Issued {formatDate(invoice.createdAt)}<br />Due {invoice.dueDate ? formatDate(invoice.dueDate) : "on receipt"}<br /><br /><Status value={invoice.status} /></div></div><div className="split" style={{ margin: "18px 0" }}><div><p className="eyebrow">Bill to</p><strong>{invoice.customer.name}</strong><br /><span className="muted">{invoice.customer.address ?? "Address not provided"}</span></div><div><p className="eyebrow">Payment terms</p><strong>{invoice.dueDate ? "Due by the date shown" : "Due on receipt"}</strong><br /><span className="muted">UPI / card / bank transfer</span></div></div><div className="data-list">{lines.map((line, index) => <div className="row" key={`${line.description}-${index}`}><div><strong>{line.description}</strong><span>{line.quantity} × {formatINR(line.unitPrice)} · GST {line.taxRate}%</span></div><strong>{formatINR(line.quantity * line.unitPrice)}</strong></div>)}<div className="row"><span>GST</span><strong>{formatINR(invoice.tax)}</strong></div></div><div className="invoice-total"><span>Total payable</span><span>{formatINR(invoice.total)}</span></div></article></>;
 }

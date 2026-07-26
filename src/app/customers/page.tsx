@@ -1,15 +1,13 @@
-"use client";
-import { useState } from "react";
-import { customers as initialCustomers } from "@/lib/demo-data";
-import { formatINR } from "@/lib/format";
+import { CustomerForm } from "@/components/customer-form";
 import { EmptyState, PageHeader } from "@/components/ui";
+import { formatINR } from "@/lib/format";
+import { currentWorkspaceId } from "@/server/current-workspace";
+import { forWorkspace } from "@/server/persistence";
 
-export default function CustomersPage() {
-  const [items, setItems] = useState(initialCustomers);
-  const [showForm, setShowForm] = useState(false);
-  const [name, setName] = useState(""); const [phone, setPhone] = useState(""); const [area, setArea] = useState("");
-  function addCustomer(event: React.FormEvent) { event.preventDefault(); if (!name.trim() || !phone.trim()) return; setItems([{ id: crypto.randomUUID(), name, phone, area: area || "Not set", jobs: 0, due: 0 }, ...items]); setName(""); setPhone(""); setArea(""); setShowForm(false); }
-  return <><PageHeader eyebrow="People you serve" title="Customers" action={<button onClick={() => setShowForm(!showForm)}>+ New customer</button>} />
-  {showForm && <section className="panel"><form className="form-grid two" onSubmit={addCustomer}><div className="field"><label htmlFor="name">Customer name</label><input id="name" value={name} onChange={(e) => setName(e.target.value)} required placeholder="e.g. Priya Iyer" /></div><div className="field"><label htmlFor="phone">Mobile number</label><input id="phone" value={phone} onChange={(e) => setPhone(e.target.value)} required placeholder="+91 98…" /></div><div className="field"><label htmlFor="area">Area</label><input id="area" value={area} onChange={(e) => setArea(e.target.value)} placeholder="e.g. Jayanagar" /></div><div className="form-actions"><button type="submit">Save customer</button><button type="button" className="secondary" onClick={() => setShowForm(false)}>Cancel</button></div></form></section>}
-  <section className="panel"><div className="panel-title"><h2>{items.length} customers</h2><span>Changes last for this demo session</span></div>{items.length ? <div className="table-wrap"><table className="data-table"><thead><tr><th>Customer</th><th>Phone</th><th>Area</th><th>Jobs</th><th>Outstanding</th></tr></thead><tbody>{items.map((customer) => <tr key={customer.id}><td><strong>{customer.name}</strong></td><td className="muted">{customer.phone}</td><td>{customer.area}</td><td>{customer.jobs}</td><td><strong>{formatINR(customer.due)}</strong></td></tr>)}</tbody></table></div> : <EmptyState title="Your customer list is ready">Add the first customer to start a job.</EmptyState>}</section></>;
+export default async function CustomersPage() {
+  const workspace = forWorkspace(await currentWorkspaceId());
+  const [customers, invoices] = await Promise.all([workspace.customers.list(), workspace.invoices.list()]);
+  const outstanding = new Map<string, number>();
+  for (const invoice of invoices.filter((invoice) => invoice.status !== "PAID")) outstanding.set(invoice.customerId, (outstanding.get(invoice.customerId) ?? 0) + invoice.total);
+  return <><PageHeader eyebrow="People you serve" title="Customers" action={<CustomerForm />} /><section className="panel"><div className="panel-title"><h2>{customers.length} customers</h2><span>Saved to this workspace</span></div>{customers.length ? <div className="table-wrap"><table className="data-table"><thead><tr><th>Customer</th><th>Phone</th><th>Area</th><th>Jobs</th><th>Outstanding</th></tr></thead><tbody>{customers.map((customer) => <tr key={customer.id}><td><strong>{customer.name}</strong></td><td className="muted">{customer.phone}</td><td>{customer.address ?? "Not set"}</td><td>{customer._count.jobs}</td><td><strong>{formatINR(outstanding.get(customer.id) ?? 0)}</strong></td></tr>)}</tbody></table></div> : <EmptyState title="Your customer list is ready" href="/customers" action="Add a customer">Add the first customer to start a job.</EmptyState>}</section></>;
 }

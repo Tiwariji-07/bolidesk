@@ -19,7 +19,7 @@ test("core routes load and the job-to-payment flow is usable", async ({ page }) 
   }
 
   await page.goto("/jobs");
-  await page.getByRole("button", { name: "Parse job note" }).click();
+  await page.getByRole("button", { name: "Parse & save job" }).click();
   await expect(page.getByText("Quote total")).toBeVisible();
 
   await page.goto("/invoices/BD-2048");
