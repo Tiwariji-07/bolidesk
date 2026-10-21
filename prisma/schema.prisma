@@ -94,6 +94,8 @@ enum DeliveryChannel {
 
 enum DeliveryStatus {
   SENT
+  DELIVERED
+  READ
   FAILED
 }
 
@@ -440,7 +442,9 @@ model DeliveryLog {
   template    String?
   payloadJson Json
   status      DeliveryStatus
-  providerMessageId String?
+  providerMessageId String?   @unique
+  /** invoice | reminder; used to stop a double tap sending twice. */
+  purpose     String?
   error       String?
   createdAt   DateTime       @default(now())
   sentAt      DateTime?

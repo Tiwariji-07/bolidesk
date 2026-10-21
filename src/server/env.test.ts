@@ -14,7 +14,7 @@ describe("environment validation", () => {
     const variables = validateEnvironment({ ...base, DEMO_MODE: "false", AI_PROVIDER: "openai", APP_URL: "http://shop.example" }).map((issue) => issue.variable);
     expect(variables).toContain("RAZORPAY_WEBHOOK_SECRET");
     expect(variables).toContain("OPENAI_API_KEY");
-    expect(variables).toContain("CRON_SECRET");
+    expect(variables).toContain("WHATSAPP_APP_SECRET");
     expect(variables).toContain("APP_URL");
   });
 });

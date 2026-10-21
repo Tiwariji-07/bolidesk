@@ -7,6 +7,7 @@ import { assignJobCustomer, convertQuote, createBlankInvoice, createBlankQuote, 
 import { createCustomer, updateCustomer, updateSettings, type CustomerInput, type SettingsInput } from "@/server/customers";
 import { attempt, UserError } from "@/server/errors";
 import { issueCreditNote } from "@/server/credit-notes";
+import { sendInvoiceMessage, type MessagePurpose } from "@/server/delivery";
 import { completeFollowUp, createFollowUp, snoozeFollowUp } from "@/server/followups";
 import { createProviders } from "@/server/integrations/providers";
 import { createPaymentRequest, recordPayment, recordRefund, reversePayment } from "@/server/payments";
@@ -153,6 +154,14 @@ export async function issueCreditNoteAction(invoiceId: string, version: number, 
   return attempt(async () => {
     const result = await issueCreditNote(await requireAccess("credit.issue"), { invoiceId: id(invoiceId, "Invoice"), version, reason: String(reason ?? "") }, createProviders().payments);
     refresh("/invoices", `/invoices/${invoiceId}`, "/", "/reports");
+    return result;
+  });
+}
+
+export async function sendWhatsAppAction(invoiceId: string, purpose: MessagePurpose) {
+  return attempt(async () => {
+    const result = await sendInvoiceMessage(await requireAccess("messages.send"), id(invoiceId, "Invoice"), purpose === "reminder" ? "reminder" : "invoice", createProviders().messaging);
+    refresh(`/invoices/${invoiceId}`);
     return result;
   });
 }
