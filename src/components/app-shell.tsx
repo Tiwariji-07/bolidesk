@@ -5,10 +5,10 @@ import { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { logout } from "@/app/auth-actions";
 
-const links = [["/", "Overview"], ["/jobs", "Jobs"], ["/customers", "Customers"], ["/quotes", "Quotes"], ["/invoices", "Invoices"], ["/follow-ups", "Follow-ups"], ["/reports", "Day book"], ["/settings", "Settings"]];
 const publicPrefixes = ["/login", "/register", "/invite", "/p/", "/payment-complete"];
 
-export function AppShell({ children, demoMode, workspaceName }: { children: ReactNode; demoMode: boolean; workspaceName?: string }) {
+/** `links` come from the server, filtered by the signed-in member's role. */
+export function AppShell({ children, demoMode, workspaceName, links = [] }: { children: ReactNode; demoMode: boolean; workspaceName?: string; links?: [string, string][] }) {
   const pathname = usePathname();
   if (publicPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`))) return <>{children}</>;
   const current = (href: string) => href === "/" ? pathname === href : pathname.startsWith(href);

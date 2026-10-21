@@ -44,5 +44,20 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  # docker compose --profile ops run --rm backup  (schedule it nightly with cron or a systemd timer)
+  backup:
+    image: postgres:16-alpine
+    profiles: ["ops"]
+    entrypoint: ["bash", "/scripts/backup.sh"]
+    environment:
+      DATABASE_URL: postgresql://bolidesk:bolidesk@db:5432/bolidesk
+      BACKUP_DIR: /backups
+    volumes:
+      - ./scripts:/scripts:ro
+      - ${BACKUP_HOST_DIR:-./backups}:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
   postgres_data:
