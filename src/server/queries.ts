@@ -12,7 +12,9 @@ type InvoiceMoney = Pick<Invoice, "status" | "totalPaise" | "dueDate"> & { payme
 
 /** Balance from the ledger. Every invoice query below includes its payment amounts. */
 export function invoiceBalance(invoice: InvoiceMoney): Balance {
-  return balanceOf(invoice.totalPaise, 0, invoice.payments.reduce((sum, payment) => sum + payment.amountPaise, 0));
+  const balance = balanceOf(invoice.totalPaise, 0, invoice.payments.reduce((sum, payment) => sum + payment.amountPaise, 0));
+  // A draft is not a demand for money: nothing is collectible until it is issued.
+  return invoice.status === "DRAFT" ? { ...balance, due: 0 } : balance;
 }
 
 const paymentAmounts = { payments: { select: { amountPaise: true } } } as const;

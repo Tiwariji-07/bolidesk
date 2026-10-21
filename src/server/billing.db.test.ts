@@ -73,12 +73,30 @@ describe("billing documents (Postgres)", () => {
     const shop = await readyShop();
     const quote = await createBlankQuote(shop.office, shop.customer.id);
     await saveQuoteDraft(shop.office, { id: quote.id, version: 0, lines: [line] });
-    await moveQuote(shop.office, quote.id, "SENT");
+    await moveQuote(shop.office, quote.id, "SENT", 1);
     await moveQuote(shop.owner, quote.id, "ACCEPTED");
     const [first, second] = await Promise.all([convertQuote(shop.office, quote.id), convertQuote(shop.owner, quote.id)]);
     expect(first.id).toBe(second.id);
     await expect(moveQuote(shop.office, quote.id, "REJECTED")).rejects.toThrow(/cannot be marked/);
     expect((await getPrisma().quote.findUniqueOrThrow({ where: { id: quote.id } })).status).toBe("INVOICED");
+  });
+
+  it("sends only the quote version the sender reviewed, and freezes its tax", async () => {
+    const shop = await readyShop();
+    const quote = await createBlankQuote(shop.office, shop.customer.id);
+    await saveQuoteDraft(shop.office, { id: quote.id, version: 0, lines: [line] });
+    await saveQuoteDraft(shop.technician, { id: quote.id, version: 1, lines: [{ ...line, unitPrice: "6,505" }] });
+    await expect(moveQuote(shop.office, quote.id, "SENT", 1)).rejects.toThrow(/changed this just now/);
+    await moveQuote(shop.office, quote.id, "SENT", 2);
+    await getPrisma().workspace.update({ where: { id: shop.workspace.id }, data: { gstScheme: "UNREGISTERED", gstin: null } });
+    expect(await getPrisma().quote.findUniqueOrThrow({ where: { id: quote.id } })).toMatchObject({ totalPaise: 1535180, linesJson: [expect.objectContaining({ cgst: 117090 })] });
+  });
+
+  it("stops cash from issuing a draft someone changed after it was opened", async () => {
+    const shop = await readyShop();
+    const draft = await draftInvoice(shop);
+    await saveInvoiceDraft(shop.office, { id: draft.id, version: draft.version, lines: [{ ...line, unitPrice: "6,505" }] });
+    await expect(recordPayment(shop.technician, { invoiceId: draft.id, amount: "1,535.18", method: "CASH", idempotencyKey: `stale-${draft.id}`, draftVersion: draft.version })).rejects.toThrow(/changed this just now/);
   });
 
   it("rejects a stale draft save", async () => {
@@ -93,7 +111,7 @@ describe("billing documents (Postgres)", () => {
     const draft = await draftInvoice(shop);
     await expect(issueInvoice(shop.technician, { id: draft.id, version: draft.version })).rejects.toBeInstanceOf(AccessError);
     await expect(saveInvoiceDraft(shop.technician, { id: draft.id, version: draft.version, lines: [line] })).rejects.toBeInstanceOf(AccessError);
-    await recordPayment(shop.technician, { invoiceId: draft.id, amount: "1,535.18", method: "CASH", idempotencyKey: "tech-cash-1" });
+    await recordPayment(shop.technician, { invoiceId: draft.id, amount: "1,535.18", method: "CASH", idempotencyKey: `tech-cash-${draft.id}`, draftVersion: draft.version });
     expect(await getPrisma().invoice.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({ status: "PAID", number: expect.stringMatching(/^TSI-/) });
   });
 

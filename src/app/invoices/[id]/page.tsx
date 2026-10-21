@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createPaymentRequestAction, issueInvoiceAction, sharePortalLinkAction } from "@/app/actions";
+import { createPaymentRequestAction, sharePortalLinkAction } from "@/app/actions";
 import { ActionButton } from "@/components/action-button";
 import { buyerFromSnapshot, DocumentView, sellerFromSnapshot } from "@/components/document-view";
 import { LineEditor } from "@/components/line-editor";
@@ -27,15 +27,12 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
     const editable = can(access, "invoices.write");
     return <><PageHeader eyebrow={`Draft invoice for ${invoice.customer.name}`} title="Draft invoice" action={<Link className="button secondary" href={`/customers/${invoice.customer.id}`}>Customer</Link>} />
       {invoice.quote && <p className="muted">From quote <Link className="text-link-ink" href={`/quotes/${invoice.quote.id}`}>{invoice.quote.number}</Link>.</p>}
-      {editable ? <LineEditor kind="invoice" id={invoice.id} version={invoice.version} lines={lines} dueDate={invoice.dueDate ? toIsoDate(invoice.dueDate) : null} placeOfSupply={invoice.placeOfSupply} paymentTerms={invoice.paymentTerms} seller={{ stateCode: workspace.stateCode, gstScheme: workspace.gstScheme as GstScheme | null, rates: ALLOWED_RATES[workspace.gstRateProfile] }} defaultRate={workspace.defaultTaxRate} defaultCode={workspace.defaultCode} />
+      {editable ? <LineEditor kind="invoice" id={invoice.id} version={invoice.version} lines={lines} dueDate={invoice.dueDate ? toIsoDate(invoice.dueDate) : null} placeOfSupply={invoice.placeOfSupply} paymentTerms={invoice.paymentTerms} seller={{ stateCode: workspace.stateCode, gstScheme: workspace.gstScheme as GstScheme | null, rates: ALLOWED_RATES[workspace.gstRateProfile] }} defaultRate={workspace.defaultTaxRate} defaultCode={workspace.defaultCode} finalize={problems.length ? undefined : { label: "Issue invoice", confirmText: "Issue this invoice? It gets the next number and cannot be edited afterwards." }} />
         : <p className="notice">The office prepares this invoice. You can record a cash payment once it has lines.</p>}
       <section className="panel"><div className="panel-title"><h2>Issue</h2><span>Numbers are given when an invoice is issued</span></div>
-        {problems.length ? <ul className="notice error-notice">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul> : <p className="muted">Issuing freezes the lines, your business details and the customer&apos;s details, and gives the next number in this financial year.</p>}
-        <div className="form-actions">
-          {editable && <ActionButton action={issueInvoiceAction.bind(null, invoice.id, invoice.version)} label="Issue invoice" pendingLabel="Issuing…" confirmText="Issue this invoice? It cannot be edited afterwards." />}
-        </div>
+        {problems.length ? <ul className="notice error-notice">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul> : <p className="muted">Issue invoice (in the editor above) freezes the lines, your business details and the customer&apos;s details, and gives the next number in this financial year.</p>}
       </section>
-      {can(access, "payments.cash") && invoice.totalPaise > 0 && <section className="panel"><div className="panel-title"><h2>Paid on the spot?</h2><span>Records cash and issues the invoice in one step</span></div><RecordPaymentForm invoiceId={invoice.id} duePaise={invoice.totalPaise} allowNonCash={false} draft /></section>}</>;
+      {can(access, "payments.cash") && invoice.totalPaise > 0 && <section className="panel"><div className="panel-title"><h2>Paid on the spot?</h2><span>Records cash and issues the invoice in one step</span></div><RecordPaymentForm invoiceId={invoice.id} duePaise={invoice.totalPaise} allowNonCash={false} draftVersion={invoice.version} /></section>}</>;
   }
 
   const seller = sellerFromSnapshot(invoice.sellerSnapshot as SellerSnapshot | null, { name: workspace.legalName ?? workspace.name, brandName: workspace.brandName });
@@ -47,7 +44,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       {can(access, "payments.request") && <ActionButton action={createPaymentRequestAction.bind(null, invoice.id)} label={isDemoMode() ? "Payment link (demo)" : "Payment link"} pendingLabel="Preparing…" linkLabel={isDemoMode() ? "Demo: the customer sees the invoice; no money is collected." : "Send this to the customer: invoice with a Razorpay pay button"} whatsappText={`Invoice ${invoice.number} from ${workspace.brandName}, ${formatINR(invoice.balance.due)} due:`} />}
       {can(access, "portal.share") && <ActionButton variant="secondary" action={sharePortalLinkAction.bind(null, { invoiceId: invoice.id })} label="Invoice link only" pendingLabel="Preparing…" linkLabel="Private invoice link, valid 30 days" whatsappText={`Invoice ${invoice.number} from ${workspace.brandName}:`} />}
     </div>
-      {can(access, "payments.cash") && <div style={{ marginTop: 16 }}><RecordPaymentForm invoiceId={invoice.id} duePaise={invoice.balance.due} allowNonCash={can(access, "payments.manual")} draft={false} /></div>}
+      {can(access, "payments.cash") && <div style={{ marginTop: 16 }}><RecordPaymentForm invoiceId={invoice.id} duePaise={invoice.balance.due} allowNonCash={can(access, "payments.manual")} /></div>}
     </section>}
     {can(access, "ledger.view") && invoice.payments.length > 0 && <section className="panel no-print"><div className="panel-title"><h2>Payments</h2><span>{formatINR(invoice.balance.paid)} received{invoice.balance.refundDue ? `, ${formatINR(invoice.balance.refundDue)} to refund` : ""}</span></div>
       <ul className="card-list">{invoice.payments.map((payment) => <li key={payment.id}><div className="card-row"><div><strong>{payment.receiptNumber ?? (payment.entryKind === "RECEIPT" ? "Opening balance" : payment.entryKind === "REVERSAL" ? "Reversal" : "Refund")}</strong><span>{formatDate(payment.occurredAt)} · {payment.method?.toLowerCase() ?? "earlier record"}{payment.reference ? ` · ${payment.reference}` : ""}{payment.recordedBy ? ` · ${payment.recordedBy.name ?? payment.recordedBy.email}` : ""}{payment.reason ? ` · ${payment.reason}` : ""}</span></div>

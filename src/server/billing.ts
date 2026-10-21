@@ -2,7 +2,7 @@ import type { DocumentKind, Invoice, Prisma, Workspace } from "@prisma/client";
 import { z } from "zod";
 import { businessDate, dateOnly, isIsoDate, type IsoDate } from "@/domain/business-time";
 import { canMoveQuote, documentNumber, type QuoteStatus } from "@/domain/documents";
-import { calculateDocument, isValidGstin, STATES, taxModeFor, UTGST_STATES, validateLines, type DocumentLine, type GstRateProfile, type TaxMode } from "@/domain/gst";
+import { calculateDocument, isValidGstin, STATES, taxModeFor, UTGST_STATES, validateLines, type CalculatedLine, type DocumentLine, type GstRateProfile, type TaxMode } from "@/domain/gst";
 import type { ParsedJobNote } from "@/domain/job-note";
 import { parseRupees } from "@/domain/money";
 import type { Access } from "./access";
@@ -40,6 +40,15 @@ export function toDocumentLines(lines: z.output<typeof lineInputSchema>[]): Docu
 
 export function storedLines(json: Prisma.JsonValue): DocumentLine[] {
   return Array.isArray(json) ? (json as DocumentLine[]) : [];
+}
+
+/** Tax heads of a frozen document (sent quote, issued invoice): summed from its stored calculated lines. */
+export function frozenHeads(json: Prisma.JsonValue) {
+  const lines = storedLines(json) as CalculatedLine[];
+  if (!lines.length || lines.some((line) => typeof line.taxable !== "number")) return null;
+  const sum = (key: "taxable" | "cgst" | "sgst" | "igst") => lines.reduce((total, line) => total + line[key], 0);
+  const tax = sum("cgst") + sum("sgst") + sum("igst");
+  return { lines, subtotal: sum("taxable"), cgst: sum("cgst"), sgst: sum("sgst"), igst: sum("igst"), tax, total: sum("taxable") + tax };
 }
 
 export function workspaceMode(workspace: Pick<Workspace, "gstScheme" | "stateCode">, placeOfSupply: string | null | undefined): TaxMode {
@@ -156,15 +165,25 @@ export function saveQuoteDraft(access: Access, raw: DraftInput) {
 }
 
 /** DRAFT -> SENT allocates the quote number; SENT -> ACCEPTED/REJECTED. Every move is a conditional update. */
-export function moveQuote(access: Access, quoteId: string, to: Exclude<QuoteStatus, "DRAFT" | "INVOICED">) {
+export function moveQuote(access: Access, quoteId: string, to: Exclude<QuoteStatus, "DRAFT" | "INVOICED">, expectedVersion?: number) {
   return withStaffLock(access, "quotes.decide", async (tx, actor) => {
     const quote = await tx.quote.findFirst({ where: { id: quoteId, workspaceId: actor.workspaceId }, include: { invoice: { select: { id: true } } } });
     if (!quote) throw new UserError("Quote not found.");
     if (quote.invoice || !canMoveQuote(quote.status, to)) throw new UserError(`A ${quote.status.toLowerCase()} quote cannot be marked ${to.toLowerCase()}.`);
+    if (to === "SENT" && expectedVersion === undefined) throw new UserError("Reload the quote and try again.");
+    const version = expectedVersion ?? quote.version;
     const workspace = await loadWorkspace(tx, actor.workspaceId);
-    if (to === "SENT") ensureValid(storedLines(quote.linesJson), workspace, workspaceMode(workspace, quote.placeOfSupply), false);
+    let frozen = {};
+    if (to === "SENT") {
+      // What the customer sees is fixed now; later changes to GST settings do not change a sent quote.
+      const mode = workspaceMode(workspace, quote.placeOfSupply);
+      const lines = storedLines(quote.linesJson);
+      ensureValid(lines, workspace, mode, false);
+      const totals = calculateDocument(lines, mode);
+      frozen = { linesJson: totals.lines as unknown as Prisma.InputJsonValue, subtotalPaise: totals.subtotal, taxPaise: totals.tax, totalPaise: totals.total };
+    }
     const number = to === "SENT" && !quote.number ? await allocateNumber(tx, workspace, "QUOTE", businessDate()) : quote.number;
-    const changed = await tx.quote.updateMany({ where: { id: quote.id, status: quote.status, version: quote.version }, data: { status: to, number, version: { increment: 1 } } });
+    const changed = await tx.quote.updateMany({ where: { id: quote.id, status: quote.status, version }, data: { status: to, number, ...frozen, version: { increment: 1 } } });
     if (changed.count !== 1) throw new ConflictError();
     await logActivity(tx, actor, `Quote ${number} marked ${to.toLowerCase()}`);
     return { number };
@@ -222,7 +241,6 @@ export function sellerProblems(workspace: Workspace): string[] {
   if (!workspace.gstScheme) problems.push("Choose your GST registration type in Settings.");
   if (!workspace.legalName || !workspace.address || !workspace.stateCode) problems.push("Add your legal name, address and state in Settings.");
   if (workspace.gstScheme && workspace.gstScheme !== "UNREGISTERED" && (!workspace.gstin || !isValidGstin(workspace.gstin))) problems.push("Add a valid GSTIN in Settings.");
-  if (workspace.gstScheme === "REGULAR" && workspace.stateCode && UTGST_STATES.has(workspace.stateCode)) problems.push("UTGST invoices are not supported yet for your territory.");
   return problems;
 }
 
@@ -237,6 +255,7 @@ export async function issueInTx(tx: Tx, actor: Actor, invoice: Invoice, expected
   if (problems.length) throw new UserError(problems.join(" "));
   const placeOfSupply = invoice.placeOfSupply ?? customer.stateCode ?? workspace.stateCode;
   const mode = workspaceMode(workspace, placeOfSupply);
+  if (mode === "INTRA" && workspace.stateCode && UTGST_STATES.has(workspace.stateCode)) throw new UserError("Same-territory invoices need UTGST, which BoliDesk does not print yet. IGST invoices to other states work.");
   const lines = storedLines(invoice.linesJson);
   ensureValid(lines, workspace, mode, true);
   const totals = calculateDocument(lines, mode);

@@ -8,7 +8,8 @@ import { paiseToRupeeInput } from "@/domain/money";
 const METHODS = [["CASH", "Cash"], ["UPI", "UPI (direct)"], ["CARD", "Card machine"], ["BANK", "Bank transfer"]] as const;
 
 /** Each opened form gets its own key, so a double tap or a retry after a timeout records the payment once. */
-export function RecordPaymentForm({ invoiceId, duePaise, allowNonCash, draft }: { invoiceId: string; duePaise: number; allowNonCash: boolean; draft: boolean }) {
+export function RecordPaymentForm({ invoiceId, duePaise, allowNonCash, draftVersion }: { invoiceId: string; duePaise: number; allowNonCash: boolean; draftVersion?: number }) {
+  const draft = draftVersion !== undefined;
   const router = useRouter();
   const [key, setKey] = useState(() => crypto.randomUUID());
   const [method, setMethod] = useState("CASH");
@@ -17,7 +18,7 @@ export function RecordPaymentForm({ invoiceId, duePaise, allowNonCash, draft }: 
   function submit(formData: FormData) {
     setError(""); setDone("");
     startTransition(async () => {
-      const result = await recordPaymentAction({ invoiceId, amount: String(formData.get("amount") ?? ""), method, reference: String(formData.get("reference") ?? ""), idempotencyKey: key });
+      const result = await recordPaymentAction({ invoiceId, amount: String(formData.get("amount") ?? ""), method, reference: String(formData.get("reference") ?? ""), idempotencyKey: key, draftVersion });
       if (!result.ok) return setError(result.error);
       setDone(`Receipt ${result.data?.receiptNumber} recorded.`);
       setKey(crypto.randomUUID());

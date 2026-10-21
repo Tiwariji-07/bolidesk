@@ -46,7 +46,7 @@ async function main() {
   // Ravi: job -> quote -> accepted -> invoice issued, due last week (overdue).
   const raviJob = await saveJob(owner, { note: "Ravi Sharma, 2 AC services at 650 each, 1 capacitor at 950, GST 18%", customerId: ravi.id }, parser);
   const raviQuote = await createQuoteFromJob(owner, raviJob.job.id);
-  await moveQuote(owner, raviQuote.id, "SENT");
+  await moveQuote(owner, raviQuote.id, "SENT", raviQuote.version);
   await moveQuote(owner, raviQuote.id, "ACCEPTED");
   const raviDraft = await convertQuote(owner, raviQuote.id);
   await saveInvoiceDraft(owner, { id: raviDraft.id, version: raviDraft.version, dueDate: addDays(today, -7), lines: [{ description: "AC service", quantity: 2, unitPrice: "650", taxRate: 18, code: "998719" }, { description: "Capacitor", quantity: 1, unitPrice: "950", taxRate: 18, code: "998719" }] });
@@ -56,15 +56,15 @@ async function main() {
   // Aman: annual maintenance, invoiced and paid.
   const amanJob = await saveJob(owner, { note: "Aman Verma, annual AC maintenance at 4,500, GST 18%", customerId: aman.id }, parser);
   const amanQuote = await createQuoteFromJob(owner, amanJob.job.id);
-  await moveQuote(owner, amanQuote.id, "SENT");
+  await moveQuote(owner, amanQuote.id, "SENT", amanQuote.version);
   await moveQuote(owner, amanQuote.id, "ACCEPTED");
   const amanDraft = await convertQuote(owner, amanQuote.id);
-  await recordPayment(owner, { invoiceId: amanDraft.id, amount: "5,310", method: "CASH", idempotencyKey: "seed-aman-cash" });
+  await recordPayment(owner, { invoiceId: amanDraft.id, amount: "5,310", method: "CASH", idempotencyKey: "seed-aman-cash", draftVersion: amanDraft.version });
 
   // Meera: installation quote sent and waiting.
   const meeraJob = await saveJob(owner, { note: "Meera Nair, split AC installation at 10,000, copper piping at Rs 1,800, GST 18%", customerId: meera.id }, parser);
   const meeraQuote = await createQuoteFromJob(owner, meeraJob.job.id);
-  await moveQuote(owner, meeraQuote.id, "SENT");
+  await moveQuote(owner, meeraQuote.id, "SENT", meeraQuote.version);
 
   await prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
   console.log("Seeded the CoolCare demo workspace.");

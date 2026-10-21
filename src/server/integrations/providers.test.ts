@@ -17,13 +17,15 @@ describe("credential-ready providers", () => {
     expect(() => createProviders({ env: readEnvironment({ DEMO_MODE: "false", OPENAI_API_KEY: "key" }) })).toThrow("WHATSAPP_ACCESS_TOKEN is required");
   });
 
-  it("parses OpenAI structured output through an injected fetcher", async () => {
+  it("parses OpenAI output into exact paise and keeps an unstated GST rate empty", async () => {
     const calls: RequestInit[] = [];
     const parser = new OpenAiStructuredJobParser("test-key", "test-model", async (_url, init) => {
       calls.push(init!);
-      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ paymentTerms: "Due on receipt", lines: [{ description: "AC service", quantity: 1, unitPrice: 650, taxRate: 18 }] }) } }] }), { status: 200 });
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ customerName: "Ravi", dueDate: "2026-02-31", paymentTerms: null, lines: [{ description: "AC service", quantity: 2, unitPriceRupees: "650.50", taxRate: 18 }, { description: "Visit", quantity: 1, unitPriceRupees: "300", taxRate: null }, { description: "Junk", quantity: 1, unitPriceRupees: "abc", taxRate: 18 }] }) } }] }), { status: 200 });
     });
-    await expect(parser.parse("Ravi, AC service at 650")).resolves.toMatchObject({ lines: [{ unitPrice: 650 }] });
+    const parsed = await parser.parse("Ravi, 2 AC service at 650.50, GST 18%, visit 300");
+    expect(parsed.lines).toEqual([{ description: "AC service", quantity: 2, unitPrice: 65050, taxRate: 18 }, { description: "Visit", quantity: 1, unitPrice: 30000, taxRate: null }]);
+    expect(parsed.dueDate).toBeUndefined();
     expect(calls[0].headers).toMatchObject({ Authorization: "Bearer test-key" });
   });
 

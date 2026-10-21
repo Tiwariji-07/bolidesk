@@ -47,6 +47,8 @@ export const paymentInputSchema = z.object({
   method: z.enum(["CASH", "UPI", "CARD", "BANK"]),
   reference: z.string().trim().max(120).optional().transform((value) => value || null),
   idempotencyKey: z.string().min(8).max(64),
+  /** For cash on a draft: the draft version on screen, so a draft changed by someone else is not issued unseen. */
+  draftVersion: z.number().int().min(0).optional(),
 });
 
 /** Money received at the counter or by direct transfer. Cash may close a draft (it is issued first); others need an issued invoice. */
@@ -66,7 +68,8 @@ export async function recordPayment(access: Access, raw: z.input<typeof paymentI
     if (invoice.status === "CREDITED") throw new UserError("This invoice was cancelled with a credit note.");
     if (invoice.status === "DRAFT") {
       if (input.method !== "CASH") throw new UserError("Issue the invoice before recording a UPI, card or bank payment.");
-      invoice = await issueInTx(tx, actor, invoice);
+      if (input.draftVersion === undefined) throw new UserError("Reload the invoice and try again.");
+      invoice = await issueInTx(tx, actor, invoice, input.draftVersion);
     }
     const before = await balanceInTx(tx, invoice.id, invoice.totalPaise);
     if (amount > before.due) throw new UserError(`Only ${formatINR(before.due)} is due on this invoice.`);

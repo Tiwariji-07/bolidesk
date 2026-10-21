@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveInvoiceDraftAction, saveQuoteDraftAction } from "@/app/actions";
+import { issueInvoiceAction, moveQuoteAction, saveInvoiceDraftAction, saveQuoteDraftAction } from "@/app/actions";
 import { calculateDocument, STATES, taxModeFor, type DocumentLine, type GstScheme } from "@/domain/gst";
 import { paiseToRupeeInput, parseRupees } from "@/domain/money";
 import { formatINR } from "@/lib/format";
@@ -14,13 +14,14 @@ let nextKey = 1;
 const toRow = (line: DocumentLine): Row => ({ key: nextKey++, description: line.description, quantity: String(line.quantity), unitPrice: line.unitPrice ? paiseToRupeeInput(line.unitPrice) : "", taxRate: String(line.taxRate), code: line.code ?? "" });
 
 /** Draft quote/invoice lines. Totals here are a preview; the server recalculates from the same rules on save and issue. */
-export function LineEditor({ kind, id, version, lines, dueDate, placeOfSupply, paymentTerms, seller, defaultRate, defaultCode }: { kind: "quote" | "invoice"; id: string; version: number; lines: DocumentLine[]; dueDate: string | null; placeOfSupply: string | null; paymentTerms?: string | null; seller: Seller; defaultRate: number; defaultCode: string | null }) {
+/** `finalize` (issue invoice / mark quote sent) acts on the saved version, so it is disabled while there are unsaved edits. */
+export function LineEditor({ kind, id, version, lines, dueDate, placeOfSupply, paymentTerms, seller, defaultRate, defaultCode, finalize }: { kind: "quote" | "invoice"; id: string; version: number; lines: DocumentLine[]; dueDate: string | null; placeOfSupply: string | null; paymentTerms?: string | null; seller: Seller; defaultRate: number; defaultCode: string | null; finalize?: { label: string; confirmText: string } }) {
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>(() => lines.map(toRow));
   const [due, setDue] = useState(dueDate ?? "");
   const [pos, setPos] = useState(placeOfSupply ?? seller.stateCode ?? "");
   const [terms, setTerms] = useState(paymentTerms ?? "");
-  const [error, setError] = useState(""); const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(""); const [saved, setSaved] = useState(false); const [dirty, setDirty] = useState(false);
   const [pending, startTransition] = useTransition();
   const mode = taxModeFor(seller.gstScheme, seller.stateCode, pos || seller.stateCode);
 
@@ -29,9 +30,10 @@ export function LineEditor({ kind, id, version, lines, dueDate, placeOfSupply, p
     return calculateDocument(parsed, mode);
   }, [rows, mode]);
 
-  const update = (key: number, field: keyof Omit<Row, "key">, value: string) => { setSaved(false); setRows((current) => current.map((row) => row.key === key ? { ...row, [field]: value } : row)); };
-  const add = () => setRows((current) => [...current, { key: nextKey++, description: "", quantity: "1", unitPrice: "", taxRate: String(defaultRate), code: defaultCode ?? "" }]);
-  const remove = (key: number) => setRows((current) => current.length > 1 ? current.filter((row) => row.key !== key) : current);
+  const touch = () => { setSaved(false); setDirty(true); };
+  const update = (key: number, field: keyof Omit<Row, "key">, value: string) => { touch(); setRows((current) => current.map((row) => row.key === key ? { ...row, [field]: value } : row)); };
+  const add = () => { touch(); setRows((current) => [...current, { key: nextKey++, description: "", quantity: "1", unitPrice: "", taxRate: String(defaultRate), code: defaultCode ?? "" }]); };
+  const remove = (key: number) => { touch(); setRows((current) => current.length > 1 ? current.filter((row) => row.key !== key) : current); };
 
   function save() {
     setError(""); setSaved(false);
@@ -39,7 +41,17 @@ export function LineEditor({ kind, id, version, lines, dueDate, placeOfSupply, p
       const input = { id, version, lines: rows.map(({ description, quantity, unitPrice, taxRate, code }) => ({ description, quantity, unitPrice, taxRate, code })), dueDate: due || undefined, placeOfSupply: pos || undefined, paymentTerms: terms || undefined };
       const result = kind === "quote" ? await saveQuoteDraftAction(input) : await saveInvoiceDraftAction(input);
       if (!result.ok) return setError(result.error);
-      setSaved(true);
+      setSaved(true); setDirty(false);
+      router.refresh();
+    });
+  }
+
+  function finish() {
+    if (!finalize || dirty || !confirm(finalize.confirmText)) return;
+    setError("");
+    startTransition(async () => {
+      const result = kind === "invoice" ? await issueInvoiceAction(id, version) : await moveQuoteAction(id, "SENT", version);
+      if (!result.ok) return setError(result.error);
       router.refresh();
     });
   }
@@ -58,9 +70,9 @@ export function LineEditor({ kind, id, version, lines, dueDate, placeOfSupply, p
     </fieldset>)}
     <div className="form-actions"><button type="button" className="secondary small" onClick={add} disabled={rows.length >= 50}>+ Add line</button></div>
     <div className="form-grid two" style={{ marginTop: 14 }}>
-      <div className="field"><label htmlFor={`${id}-due`}>Due date</label><input id={`${id}-due`} type="date" value={due} onChange={(event) => { setSaved(false); setDue(event.target.value); }} /></div>
-      {seller.gstScheme === "REGULAR" && <div className="field"><label htmlFor={`${id}-pos`}>Place of supply</label><select id={`${id}-pos`} value={pos} onChange={(event) => { setSaved(false); setPos(event.target.value); }}>{Object.entries(STATES).map(([code, name]) => <option key={code} value={code}>{code} {name}</option>)}</select></div>}
-      {kind === "invoice" && <div className="field"><label htmlFor={`${id}-terms`}>Payment terms</label><input id={`${id}-terms`} value={terms} maxLength={200} onChange={(event) => { setSaved(false); setTerms(event.target.value); }} placeholder="Due on completion" /></div>}
+      <div className="field"><label htmlFor={`${id}-due`}>Due date</label><input id={`${id}-due`} type="date" value={due} onChange={(event) => { touch(); setDue(event.target.value); }} /></div>
+      {seller.gstScheme === "REGULAR" && <div className="field"><label htmlFor={`${id}-pos`}>Place of supply</label><select id={`${id}-pos`} value={pos} onChange={(event) => { touch(); setPos(event.target.value); }}>{Object.entries(STATES).map(([code, name]) => <option key={code} value={code}>{code} {name}</option>)}</select></div>}
+      {kind === "invoice" && <div className="field"><label htmlFor={`${id}-terms`}>Payment terms</label><input id={`${id}-terms`} value={terms} maxLength={200} onChange={(event) => { touch(); setTerms(event.target.value); }} placeholder="Due on completion" /></div>}
     </div>
     <dl className="doc-totals">
       <div><dt>Taxable value</dt><dd>{formatINR(preview.subtotal)}</dd></div>
@@ -70,6 +82,8 @@ export function LineEditor({ kind, id, version, lines, dueDate, placeOfSupply, p
     </dl>
     {error && <p className="notice error-notice" role="alert">{error}</p>}
     {saved && <p className="notice" role="status">Draft saved.</p>}
-    <div className="form-actions"><button type="button" onClick={save} disabled={pending}>{pending ? "Saving…" : "Save draft"}</button></div>
+    <div className="form-actions"><button type="button" className={finalize ? "secondary" : undefined} onClick={save} disabled={pending}>{pending ? "Saving…" : "Save draft"}</button>
+      {finalize && <button type="button" onClick={finish} disabled={pending || dirty} aria-describedby={dirty ? `${id}-unsaved` : undefined}>{finalize.label}</button>}
+      {finalize && dirty && <span id={`${id}-unsaved`} className="muted">Save your changes first.</span>}</div>
   </section>;
 }

@@ -71,11 +71,11 @@ export async function saveQuoteDraftAction(input: DraftInput) {
   });
 }
 
-export async function moveQuoteAction(quoteId: string, status: unknown) {
+export async function moveQuoteAction(quoteId: string, status: unknown, version?: number) {
   return attempt(async () => {
     const to = z.enum(["SENT", "ACCEPTED", "REJECTED"]).safeParse(status);
     if (!to.success) throw new UserError("Choose a valid quote status.");
-    const result = await moveQuote(await requireAccess("quotes.decide"), id(quoteId, "Quote"), to.data);
+    const result = await moveQuote(await requireAccess("quotes.decide"), id(quoteId, "Quote"), to.data, version);
     refresh("/quotes", `/quotes/${quoteId}`, "/");
     return result;
   });
@@ -124,7 +124,7 @@ export async function createPaymentRequestAction(invoiceId: string) {
   }, "The payment link could not be created. Try again in a minute.");
 }
 
-export async function recordPaymentAction(values: { invoiceId: string; amount: string; method: string; reference?: string; idempotencyKey: string }) {
+export async function recordPaymentAction(values: { invoiceId: string; amount: string; method: string; reference?: string; idempotencyKey: string; draftVersion?: number }) {
   return attempt(async () => {
     const access = await requireAccess(values.method === "CASH" ? "payments.cash" : "payments.manual");
     const result = await recordPayment(access, values as never, createProviders().payments);

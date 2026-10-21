@@ -9,7 +9,7 @@ import { formatPhone, whatsappRecipient } from "@/domain/phone";
 import { formatINR } from "@/lib/format";
 import { can, currentAccess } from "@/server/access";
 import { getPrisma } from "@/server/prisma";
-import { getCustomer, withBalance } from "@/server/queries";
+import { getCustomer, listInvoices, withBalance } from "@/server/queries";
 
 export default async function CustomerPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -20,7 +20,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
     getPrisma().quote.findMany({ where: { workspaceId: access.workspaceId, customerId: id }, orderBy: { createdAt: "desc" }, take: 20 }),
     getPrisma().invoice.findMany({ where: { workspaceId: access.workspaceId, customerId: id }, include: { payments: { select: { amountPaise: true } } }, orderBy: { createdAt: "desc" }, take: 20 }).then((rows) => rows.map(withBalance)),
   ]);
-  const due = invoices.reduce((sum, invoice) => sum + invoice.balance.due, 0);
+  const due = (await listInvoices(access.workspaceId)).filter((invoice) => invoice.customerId === id).reduce((sum, invoice) => sum + invoice.balance.due, 0);
   return <><PageHeader eyebrow="Customer" title={customer.name} action={<div className="form-actions">
       {can(access, "quotes.draft") && <ActionButton action={createBlankQuoteAction.bind(null, customer.id)} label="New quote" next="/quotes/{id}" />}
       {can(access, "invoices.write") && <ActionButton variant="secondary" action={createBlankInvoiceAction.bind(null, customer.id)} label="New invoice" next="/invoices/{id}" />}

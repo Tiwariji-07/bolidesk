@@ -83,18 +83,21 @@ UPDATE "Invoice" i SET
 FROM "Workspace" w, "Customer" c
 WHERE i."workspaceId" = w."id" AND i."customerId" = c."id" AND i."status" <> 'DRAFT';
 
--- Phones: one stored form for Indian mobiles (+91XXXXXXXXXX), skipped where it would merge two customers.
-UPDATE "Customer" c SET "phone" = n.normalized
-FROM (
-  SELECT "id", "workspaceId", CASE
+-- Phones: one stored form for Indian mobiles (+91XXXXXXXXXX). Any group of customers in a workspace that
+-- would end up with the same number (e.g. "9876543210" and "+91 98765 43210") is left unchanged for staff to merge.
+WITH normalized AS (
+  SELECT "id", "workspaceId", "phone", CASE
     WHEN d ~ '^[6-9][0-9]{9}$' THEN '+91' || d
     WHEN d ~ '^91[6-9][0-9]{9}$' THEN '+' || d
     WHEN d ~ '^0[6-9][0-9]{9}$' THEN '+91' || substr(d, 2)
-    ELSE NULL END AS normalized
-  FROM (SELECT "id", "workspaceId", regexp_replace("phone", '[^0-9]', '', 'g') AS d FROM "Customer") digits
-) n
-WHERE c."id" = n."id" AND n.normalized IS NOT NULL AND c."phone" <> n.normalized
-  AND NOT EXISTS (SELECT 1 FROM "Customer" o WHERE o."workspaceId" = n."workspaceId" AND o."id" <> n."id" AND o."phone" = n.normalized);
+    ELSE NULL END AS value
+  FROM (SELECT "id", "workspaceId", "phone", regexp_replace("phone", '[^0-9]', '', 'g') AS d FROM "Customer") digits
+), safe AS (
+  SELECT n."id", n.value FROM normalized n
+  WHERE n.value IS NOT NULL AND n."phone" <> n.value
+    AND (SELECT count(*) FROM normalized m WHERE m."workspaceId" = n."workspaceId" AND (m.value = n.value OR m."phone" = n.value)) = 1
+)
+UPDATE "Customer" c SET "phone" = safe.value FROM safe WHERE c."id" = safe."id";
 
 CREATE TABLE "DocumentCounter" (
   "workspaceId" TEXT NOT NULL,
