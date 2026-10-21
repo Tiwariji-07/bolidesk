@@ -38,7 +38,7 @@ test("a job note becomes an issued, paid invoice", async ({ page }) => {
   await page.getByLabel("Customer", { exact: true }).selectOption({ label: "Meera Nair" });
   await page.getByLabel("Job note or voice-note transcript").fill("Meera Nair, 1 gas refill at Rs 2,500, 2 filters at 350 each, GST 18%");
   await page.getByRole("button", { name: "Save and read note" }).click();
-  await expect(page.getByText("gas refill")).toBeVisible();
+  await expect(page.locator("[aria-live=polite]").getByText("gas refill", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Make draft quote" }).click();
   await expect(page).toHaveURL(/\/quotes\//);
 
@@ -64,4 +64,33 @@ test("a job note becomes an issued, paid invoice", async ({ page }) => {
   await expect(page.locator(".page-header .status")).toHaveText("paid");
   await page.getByRole("link", { name: "Receipt" }).first().click();
   await expect(page.getByRole("heading", { name: /^BDR-/ })).toBeVisible();
+});
+
+test("the owner invites a technician who sees only field work", async ({ page, browser }) => {
+  await signIn(page);
+  await page.goto("/settings/team");
+  const email = `tech-${Date.now()}@example.test`;
+  await page.getByLabel("Email").fill(email);
+  await page.getByLabel("Role").selectOption("MEMBER");
+  await page.getByRole("button", { name: "Create invite link" }).click();
+  const link = await page.locator(".copy-link code").innerText();
+  expect(link).toMatch(/\/invite\/[A-Za-z0-9_-]{43}$/);
+
+  const technician = await browser.newPage();
+  await technician.goto(link.replace(/^https?:\/\/[^/]+/, ""));
+  await technician.getByLabel("Your name").fill("Suresh");
+  await technician.getByLabel("Choose a password (12+ characters)").fill("a long technician password");
+  await technician.getByLabel("Repeat password").fill("a long technician password");
+  await technician.getByRole("button", { name: "Join the team" }).click();
+  await expect(technician).toHaveURL("/");
+  await expect(technician.getByRole("link", { name: "Day book" })).toHaveCount(0);
+  await technician.goto("/jobs");
+  await expect(technician.getByRole("heading", { name: "My jobs" })).toBeVisible();
+  await technician.goto("/reports");
+  await expect(technician).toHaveURL(/\/\?error=forbidden/);
+
+  // The invite link works once.
+  const again = await browser.newPage();
+  await again.goto(link.replace(/^https?:\/\/[^/]+/, ""));
+  await expect(again.getByRole("heading", { name: "This invite has expired" })).toBeVisible();
 });
