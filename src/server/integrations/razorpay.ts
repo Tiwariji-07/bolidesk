@@ -3,8 +3,8 @@ import { z } from "zod";
 import { ProviderRejectedError, type Fetcher, type PaymentLinkInput, type PaymentLinkResult, type PaymentLinkState, type PaymentProvider, type PaymentWebhookEvent } from "./types";
 
 const TIMEOUT_MS = 15_000;
-const link = z.object({ id: z.string(), reference_id: z.string().nullish(), status: z.string(), amount: z.number().int(), short_url: z.string().url().nullish(), payments: z.array(z.object({ payment_id: z.string(), amount: z.number().int(), status: z.string() })).nullish() });
-const payment = z.object({ id: z.string(), amount: z.number().int(), currency: z.string(), status: z.string() });
+const link = z.object({ id: z.string(), reference_id: z.string().nullish(), status: z.string(), amount: z.number().int(), short_url: z.string().url().nullish(), payments: z.array(z.object({ payment_id: z.string(), amount: z.number().int(), status: z.string(), created_at: z.number().int().optional() })).nullish() });
+const payment = z.object({ id: z.string(), amount: z.number().int(), currency: z.string(), status: z.string(), created_at: z.number().int().optional() });
 const webhook = z.object({
   event: z.string(),
   payload: z.object({
@@ -21,7 +21,7 @@ export function verifyRazorpaySignature(rawBody: string, signature: string | nul
 }
 
 function toState(data: z.infer<typeof link>): PaymentLinkState {
-  return { id: data.id, reference: data.reference_id ?? null, status: data.status, amount: data.amount, url: data.short_url ?? null, payments: (data.payments ?? []).map((item) => ({ id: item.payment_id, amount: item.amount, currency: "INR", status: item.status })) };
+  return { id: data.id, reference: data.reference_id ?? null, status: data.status, amount: data.amount, url: data.short_url ?? null, payments: (data.payments ?? []).map((item) => ({ id: item.payment_id, amount: item.amount, currency: "INR", status: item.status, createdAt: item.created_at })) };
 }
 
 export class RazorpayProvider implements PaymentProvider {
@@ -72,7 +72,8 @@ export class RazorpayProvider implements PaymentProvider {
     if (!parsed.success || !parsed.data.payload.payment_link) return { kind: "ignored" };
     const entity = parsed.data.payload.payment_link.entity;
     if ((parsed.data.event === "payment_link.paid" || parsed.data.event === "payment_link.partially_paid") && parsed.data.payload.payment) {
-      return { kind: "payment", linkId: entity.id, reference: entity.reference_id ?? null, linkStatus: entity.status, payment: parsed.data.payload.payment.entity };
+      const { created_at: createdAt, ...rest } = parsed.data.payload.payment.entity;
+      return { kind: "payment", linkId: entity.id, reference: entity.reference_id ?? null, linkStatus: entity.status, payment: { ...rest, createdAt } };
     }
     if (parsed.data.event === "payment_link.cancelled" || parsed.data.event === "payment_link.expired") return { kind: "link_closed", linkId: entity.id, reference: entity.reference_id ?? null, status: parsed.data.event === "payment_link.cancelled" ? "cancelled" : "expired" };
     return { kind: "ignored" };

@@ -39,7 +39,7 @@ test("a job note becomes an issued, paid invoice", async ({ page }) => {
   await page.getByLabel("Job note or voice-note transcript").fill("Meera Nair, 1 gas refill at Rs 2,500, 2 filters at 350 each, GST 18%");
   await page.getByRole("button", { name: "Save and read note" }).click();
   await expect(page.locator("[aria-live=polite]").getByText("gas refill", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Make draft quote" }).click();
+  await page.locator("[aria-live=polite]").getByRole("button", { name: "Make draft quote" }).click();
   await expect(page).toHaveURL(/\/quotes\//);
 
   await page.getByLabel("Rate (₹)").first().fill("2,600");
@@ -61,17 +61,18 @@ test("a job note becomes an issued, paid invoice", async ({ page }) => {
   await page.getByLabel("How").selectOption("UPI");
   await page.getByLabel("UPI / bank reference").fill("UTR998877");
   await page.getByRole("button", { name: "Record payment" }).click();
-  await expect(page.locator(".page-header .status")).toHaveText("paid");
-  await page.getByRole("link", { name: "Receipt" }).first().click();
+  // Settling the invoice opens the receipt to show the customer.
   await expect(page.getByRole("heading", { name: /^BDR-/ })).toBeVisible();
+  await page.getByRole("link", { name: "Back to invoice" }).click();
+  await expect(page.locator(".page-header .status")).toHaveText("paid");
 });
 
 test("the owner invites a technician who sees only field work", async ({ page, browser }) => {
   await signIn(page);
   await page.goto("/settings/team");
   const email = `tech-${Date.now()}@example.test`;
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Role").selectOption("MEMBER");
+  await page.getByLabel("Email", { exact: true }).fill(email);
+  await page.getByLabel("Role", { exact: true }).selectOption("MEMBER");
   await page.getByRole("button", { name: "Create invite link" }).click();
   const link = await page.locator(".copy-link code").innerText();
   expect(link).toMatch(/\/invite\/[A-Za-z0-9_-]{43}$/);

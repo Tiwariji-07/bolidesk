@@ -2,11 +2,18 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { scheduleJobAction, setJobStatusAction } from "@/app/actions";
+import { assignJobCustomerAction, createQuoteFromJobAction, scheduleJobAction, setJobStatusAction } from "@/app/actions";
 
 type Member = { id: string; label: string };
 
 /** Office: assign and schedule. Everyone: mark their visit done. The office can also cancel or reopen. */
+/** A saved job can be picked up later: attach its customer and make the draft quote from here. */
+export function JobQuoteControls({ jobId, hasCustomer, customers }: { jobId: string; hasCustomer: boolean; customers: { id: string; name: string }[] }) {
+  const router = useRouter(); const [error, setError] = useState(""); const [pending, startTransition] = useTransition();
+  if (hasCustomer) return <div className="action-button"><button className="small" disabled={pending} onClick={() => startTransition(async () => { setError(""); const result = await createQuoteFromJobAction(jobId); if (!result.ok) return setError(result.error); router.push(`/quotes/${result.data!.id}`); })}>{pending ? "Creating…" : "Make draft quote"}</button>{error && <p className="inline-error" role="alert">{error}</p>}</div>;
+  return <div className="action-button"><label className="sr-only" htmlFor={`customer-${jobId}`}>Customer for this job</label><select id={`customer-${jobId}`} defaultValue="" disabled={pending} onChange={(event) => { const id = event.target.value; if (id) startTransition(async () => { setError(""); const result = await assignJobCustomerAction(jobId, id); if (!result.ok) return setError(result.error); router.refresh(); }); }}><option value="" disabled>Choose the customer</option>{customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}</select>{error && <p className="inline-error" role="alert">{error}</p>}</div>;
+}
+
 export function JobControls({ jobId, status, assigneeId, visit, members, office, mine }: { jobId: string; status: string; assigneeId: string | null; visit: string | null; members: Member[]; office: boolean; mine: boolean }) {
   const router = useRouter(); const [error, setError] = useState(""); const [pending, startTransition] = useTransition();
   const run = (body: () => Promise<{ ok: boolean; error?: string }>) => startTransition(async () => { setError(""); const result = await body(); if (!result.ok) return setError(result.error ?? "Could not save."); router.refresh(); });

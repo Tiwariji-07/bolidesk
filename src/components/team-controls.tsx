@@ -23,11 +23,11 @@ export function InviteMemberForm() {
   </form>;
 }
 
-export function MemberActions({ membershipId, role }: { membershipId: string; role: "ADMIN" | "MEMBER" }) {
+export function MemberActions({ membershipId, role, email }: { membershipId: string; role: "ADMIN" | "MEMBER"; email: string }) {
   const [error, setError] = useState(""); const [pending, startTransition] = useTransition();
   const run = (body: () => Promise<{ ok: boolean; error?: string }>) => startTransition(async () => { setError(""); const result = await body(); if (!result.ok) setError(result.error ?? "Could not save."); });
   return <div className="row-end">{error && <p className="inline-error" role="alert">{error}</p>}<div className="form-actions">
-    <label className="sr-only" htmlFor={`role-${membershipId}`}>Role</label>
+    <label className="sr-only" htmlFor={`role-${membershipId}`}>Role for {email}</label>
     <select id={`role-${membershipId}`} defaultValue={role} disabled={pending} onChange={(event) => run(() => changeRoleAction(membershipId, event.target.value))}><option value="ADMIN">Office</option><option value="MEMBER">Technician</option></select>
     <button className="secondary small" disabled={pending} onClick={() => { if (confirm("Remove this person? They are signed out everywhere immediately.")) run(() => removeMemberAction(membershipId)); }}>Remove</button>
   </div></div>;

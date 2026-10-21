@@ -1,5 +1,7 @@
-# Local stack. Secrets come from your shell or .env next to this file:
-#   SESSION_SECRET (32+ chars) and DEMO_USER_PASSWORD (12+ chars) are required.
+# One shop on one server. Settings come from .env next to this file (or your shell):
+#   SESSION_SECRET (32+ chars) is always required.
+#   Demo: keep DEMO_MODE=true and set DEMO_USER_PASSWORD (12+ chars) to get the CoolCare demo shop.
+#   Live: DEMO_MODE=false, SEED_DEMO=false, APP_URL=https://... and the live credentials (docs/operations.md).
 services:
   db:
     image: postgres:16-alpine
@@ -22,11 +24,12 @@ services:
     build:
       context: .
       target: builder
-    command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts"
+    command: sh -c 'npx prisma migrate deploy && if [ "$$SEED_DEMO" != "false" ]; then npx tsx prisma/seed.ts; fi'
     environment:
       DATABASE_URL: postgresql://bolidesk:bolidesk@db:5432/bolidesk?schema=public
+      SEED_DEMO: ${SEED_DEMO:-true}
       DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-demo@bolidesk.local}
-      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:?Set DEMO_USER_PASSWORD (12+ characters)}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-}
     depends_on:
       db:
         condition: service_healthy
@@ -35,11 +38,15 @@ services:
     build: .
     ports:
       - "127.0.0.1:3000:3000"
+    # Live credentials (Razorpay, WhatsApp, OpenAI) are read from .env; the values below override it.
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql://bolidesk:bolidesk@db:5432/bolidesk?schema=public
       SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET (32+ characters)}
-      DEMO_MODE: "true"
-      APP_URL: http://localhost:3000
+      DEMO_MODE: ${DEMO_MODE:-true}
+      APP_URL: ${APP_URL:-http://localhost:3000}
     depends_on:
       migrate:
         condition: service_completed_successfully

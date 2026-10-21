@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { JobCaptureForm } from "@/components/job-capture-form";
-import { JobControls } from "@/components/job-controls";
+import { JobControls, JobQuoteControls } from "@/components/job-controls";
 import { PageHeader, Status } from "@/components/ui";
 import { formatPhone } from "@/domain/phone";
 import { formatDate, formatTime } from "@/lib/format";
@@ -27,7 +27,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
           {job.customer && <p className="muted">{job.customer.address ? `${job.customer.address} · ` : ""}<a href={`tel:${job.customer.phone}`}>{formatPhone(job.customer.phone)}</a></p>}
           <p className="muted">{job.assignee ? `With ${job.assignee.name ?? job.assignee.email}` : "Not assigned"}{job.quote ? <> · <Link className="text-link-ink" href={`/quotes/${job.quote.id}`}>{job.quote.number ?? "Draft quote"}</Link></> : ""}</p>
         </div>
-        <JobControls jobId={job.id} status={job.status} assigneeId={job.assignee?.id ?? null} visit={job.scheduledAt ? istInput(job.scheduledAt) : null} members={members} office={office} mine={job.assignee?.id === access.userId} />
+        <div className="job-controls">{!job.quote && job.status !== "CANCELLED" && can(access, "quotes.draft") && <JobQuoteControls jobId={job.id} hasCustomer={Boolean(job.customer)} customers={customers.map((customer) => ({ id: customer.id, name: customer.name }))} />}<JobControls jobId={job.id} status={job.status} assigneeId={job.assignee?.id ?? null} visit={job.scheduledAt ? istInput(job.scheduledAt) : null} members={members} office={office} mine={job.assignee?.id === access.userId} /></div>
       </div></li>)}</ul> : <p className="muted">{mineOnly ? "No jobs assigned to you." : "Saved job notes appear here."}</p>}
     </section></>;
 }

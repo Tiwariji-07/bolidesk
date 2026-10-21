@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { recordPaymentAction, recordRefundAction, reversePaymentAction } from "@/app/actions";
 import { paiseToRupeeInput } from "@/domain/money";
@@ -16,14 +17,17 @@ export function RecordPaymentForm({ invoiceId, duePaise, allowNonCash, draftVers
   const router = useRouter();
   const [key, setKey] = useState(() => crypto.randomUUID());
   const [method, setMethod] = useState("CASH");
-  const [error, setError] = useState(""); const [done, setDone] = useState("");
+  const [error, setError] = useState(""); const [done, setDone] = useState<{ number: string; paymentId: string } | null>(null);
   const [pending, startTransition] = useTransition();
   function submit(formData: FormData) {
-    setError(""); setDone("");
+    setError(""); setDone(null);
     startTransition(async () => {
       const result = await recordPaymentAction({ invoiceId, amount: String(formData.get("amount") ?? ""), method, reference: String(formData.get("reference") ?? ""), idempotencyKey: key, draftVersion });
       if (!result.ok) return setError(result.error);
-      setDone(`Receipt ${result.data?.receiptNumber} recorded.`);
+      const receipt = { number: result.data?.receiptNumber ?? "", paymentId: result.data?.paymentId ?? "" };
+      // Fully paid: this form goes away with the balance, so take the collector straight to the receipt.
+      if (result.data?.duePaise === 0) return router.push(`/invoices/${invoiceId}/receipts/${receipt.paymentId}`);
+      setDone(receipt);
       setKey(crypto.randomUUID());
       router.refresh();
     });
@@ -32,7 +36,7 @@ export function RecordPaymentForm({ invoiceId, duePaise, allowNonCash, draftVers
     <div className="field"><label htmlFor="pay-amount">Amount received (₹)</label><input id="pay-amount" name="amount" inputMode="decimal" required defaultValue={paiseToRupeeInput(duePaise)} key={duePaise} /></div>
     <div className="field"><label htmlFor="pay-method">How</label><select id="pay-method" value={method} onChange={(event) => setMethod(event.target.value)}>{METHODS.filter(([value]) => value === "CASH" || (allowNonCash && !draft)).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
     {method !== "CASH" && <div className="field"><label htmlFor="pay-ref">UPI / bank reference</label><input id="pay-ref" name="reference" required placeholder="UTR or transaction ID" /></div>}
-    {error && <p className="notice error-notice" role="alert">{error}</p>}{done && <p className="notice" role="status">{done}</p>}
+    {error && <p className="notice error-notice" role="alert">{error}</p>}{done && <p className="notice" role="status">Receipt {done.number} recorded. <Link className="text-link-ink" href={`/invoices/${invoiceId}/receipts/${done.paymentId}`}>Open receipt</Link></p>}
     <div className="form-actions"><button type="submit" disabled={pending || blocked}>{pending ? "Recording…" : draft ? "Issue and record cash" : "Record payment"}</button>{blocked && <span className="muted">Save the draft first: cash issues the saved version.</span>}</div>
   </form>;
 }

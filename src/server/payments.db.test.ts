@@ -163,10 +163,41 @@ describe("payments ledger (Postgres)", () => {
 
   it("holds a replayed webhook for a link closed by the ledger migration instead of counting it twice", async () => {
     const { shop, invoice } = await issuedInvoice();
+    // Before the ledger this invoice was marked PAID; the migration turned that into a LEGACY opening entry.
+    await db().payment.create({ data: { workspaceId: shop.workspace.id, invoiceId: invoice.id, source: "LEGACY", amountPaise: 118000, idempotencyKey: `legacy-opening-${invoice.id}` } });
+    await db().invoice.update({ where: { id: invoice.id }, data: { status: "PAID" } });
     await db().paymentRequest.create({ data: { workspaceId: shop.workspace.id, invoiceId: invoice.id, reference: `PRL${invoice.id}`, provider: "RAZORPAY", status: "EXPIRED", amountPaise: 118000, providerPaymentLinkId: `plink_l_${invoice.id}`, lastError: "legacy: closed by the payments-ledger migration" } });
     const response = await applyWebhookEvent(new FakeRazorpay(), { kind: "payment", linkId: `plink_l_${invoice.id}`, reference: null, linkStatus: "paid", payment: { id: `pay_l_${invoice.id}`, amount: 118000, currency: "INR", status: "captured" } }, findRequest);
     expect(response.status).toBe(200);
-    expect(await db().payment.count({ where: { invoiceId: invoice.id } })).toBe(0);
+    expect(await db().payment.count({ where: { invoiceId: invoice.id } })).toBe(1);
     expect(await db().activity.findFirst({ where: { workspaceId: shop.workspace.id, body: { contains: "before the payments ledger" } } })).not.toBeNull();
+  });
+
+  it("records a payment on a pre-ledger link when the invoice was not already marked paid", async () => {
+    const { shop, invoice } = await issuedInvoice();
+    await db().paymentRequest.create({ data: { workspaceId: shop.workspace.id, invoiceId: invoice.id, reference: `PRU${invoice.id}`, provider: "RAZORPAY", status: "EXPIRED", amountPaise: 118000, providerPaymentLinkId: `plink_u_${invoice.id}`, lastError: "legacy: closed by the payments-ledger migration" } });
+    await applyWebhookEvent(new FakeRazorpay(), { kind: "payment", linkId: `plink_u_${invoice.id}`, reference: null, linkStatus: "paid", payment: { id: `pay_u_${invoice.id}`, amount: 118000, currency: "INR", status: "captured" } }, findRequest);
+    expect(await status(invoice.id)).toBe("PAID");
+  });
+
+  it("books an online payment on Razorpay's payment day, not the day the webhook arrived", async () => {
+    const { shop, invoice } = await issuedInvoice();
+    const razorpay = new FakeRazorpay();
+    await createPaymentRequest(shop.office, invoice.id, razorpay);
+    const event = razorpay.pay([...razorpay.links.keys()][0]);
+    if (event.kind !== "payment") throw new Error("expected a payment event");
+    const paidAt = Math.floor(new Date("2026-10-20T18:25:00.000Z").getTime() / 1000); // 23:55 IST on 20 Oct
+    await applyWebhookEvent(razorpay, { ...event, payment: { ...event.payment, createdAt: paidAt } }, findRequest);
+    expect((await db().payment.findFirstOrThrow({ where: { invoiceId: invoice.id } })).occurredAt.toISOString()).toBe("2026-10-20T18:25:00.000Z");
+  });
+
+  it("does not reverse a receipt whose money was already refunded", async () => {
+    const { shop, invoice } = await issuedInvoice();
+    const cash = await recordPayment(shop.office, { invoiceId: invoice.id, amount: "1180", method: "CASH", idempotencyKey: key() });
+    const { issueCreditNote } = await import("./credit-notes");
+    const fresh = await db().invoice.findUniqueOrThrow({ where: { id: invoice.id } });
+    await issueCreditNote(shop.owner, { invoiceId: invoice.id, version: fresh.version, reason: "Job cancelled" });
+    await recordRefund(shop.owner, { invoiceId: invoice.id, amount: "1180", method: "CASH", reference: "", reason: "Job cancelled", idempotencyKey: key() });
+    await expect(reversePayment(shop.owner, cash.paymentId, "duplicate")).rejects.toThrow(/already refunded/);
   });
 });

@@ -98,7 +98,9 @@ export async function saveJob(access: Access, input: { note: string; customerId?
   const parsed = await parser.parse(input.note);
   return withStaffLock(access, "jobs.write", async (tx, actor) => {
     if (input.customerId && !(await tx.customer.findFirst({ where: { id: input.customerId, workspaceId: actor.workspaceId } }))) throw new UserError("Customer not found.");
-    const job = await tx.job.create({ data: { workspaceId: actor.workspaceId, customerId: input.customerId, note: input.note, parsedJson: parsed as unknown as Prisma.InputJsonValue } });
+    // A technician's own note is their job, so it shows under "My jobs" without waiting for the office.
+    const mine = actor.role === "MEMBER" ? { assigneeUserId: actor.userId } : {};
+    const job = await tx.job.create({ data: { workspaceId: actor.workspaceId, customerId: input.customerId, note: input.note, parsedJson: parsed as unknown as Prisma.InputJsonValue, ...mine } });
     await logActivity(tx, actor, "Job note saved");
     return { job, parsed };
   });
@@ -106,10 +108,9 @@ export async function saveJob(access: Access, input: { note: string; customerId?
 
 export async function assignJobCustomer(access: Access, jobId: string, customerId: string) {
   return withStaffLock(access, "jobs.write", async (tx, actor) => {
-    const [job, customer] = await Promise.all([
-      tx.job.findFirst({ where: { id: jobId, workspaceId: actor.workspaceId }, include: { quote: true } }),
-      tx.customer.findFirst({ where: { id: customerId, workspaceId: actor.workspaceId } }),
-    ]);
+    // One transaction connection runs one query at a time, so these are awaited in turn.
+    const job = await tx.job.findFirst({ where: { id: jobId, workspaceId: actor.workspaceId }, include: { quote: true } });
+    const customer = await tx.customer.findFirst({ where: { id: customerId, workspaceId: actor.workspaceId } });
     if (!job || !customer) throw new UserError("Job or customer not found.");
     if (job.quote) throw new UserError("This job already has a quote.");
     await tx.job.update({ where: { id: job.id }, data: { customerId } });
@@ -214,7 +215,7 @@ export function convertQuote(access: Access, quoteId: string) {
 
 export function createBlankInvoice(access: Access, customerId: string) {
   return withStaffLock(access, "invoices.write", async (tx, actor) => {
-    const [workspace, customer] = await Promise.all([loadWorkspace(tx, actor.workspaceId), tx.customer.findFirst({ where: { id: customerId, workspaceId: actor.workspaceId } })]);
+    const workspace = await loadWorkspace(tx, actor.workspaceId); const customer = await tx.customer.findFirst({ where: { id: customerId, workspaceId: actor.workspaceId } });
     if (!customer) throw new UserError("Customer not found.");
     const lines: DocumentLine[] = [{ description: "", quantity: 1, unitPrice: 0, taxRate: workspace.defaultTaxRate, code: workspace.defaultCode ?? undefined }];
     const invoice = await tx.invoice.create({ data: { workspaceId: actor.workspaceId, customerId, placeOfSupply: customer.stateCode ?? workspace.stateCode, subtotalPaise: 0, taxPaise: 0, totalPaise: 0, linesJson: lines as unknown as Prisma.InputJsonValue } });
@@ -257,7 +258,7 @@ export function sellerProblems(workspace: Workspace): string[] {
  */
 export async function issueInTx(tx: Tx, actor: Actor, invoice: Invoice, expectedVersion = invoice.version) {
   if (invoice.status !== "DRAFT") throw new UserError("This invoice is already issued.");
-  const [workspace, customer] = await Promise.all([loadWorkspace(tx, actor.workspaceId), tx.customer.findUniqueOrThrow({ where: { id: invoice.customerId } })]);
+  const workspace = await loadWorkspace(tx, actor.workspaceId); const customer = await tx.customer.findUniqueOrThrow({ where: { id: invoice.customerId } });
   const problems = sellerProblems(workspace);
   if (problems.length) throw new UserError(problems.join(" "));
   const placeOfSupply = invoice.placeOfSupply ?? customer.stateCode ?? workspace.stateCode;

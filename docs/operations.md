@@ -21,6 +21,7 @@ Create `.env` next to `docker-compose.yml`. Generate secrets with `openssl rand 
 ```env
 SESSION_SECRET=<64 hex characters>
 DEMO_MODE=false
+SEED_DEMO=false
 ALLOW_REGISTRATION=false
 APP_URL=https://billing.yourshop.in
 RAZORPAY_KEY_ID=...
@@ -34,7 +35,7 @@ AI_PROVIDER=openai
 OPENAI_API_KEY=...
 ```
 
-Change the compose file's `app` service to read this file (`env_file: .env`) and remove `DEMO_MODE: "true"`. Change the `migrate` service command to `npx prisma migrate deploy` so it does not create the demo shop. Then run `docker compose up -d --build`. The app refuses to start while a required setting is missing; `docker compose logs app` names the variable.
+Also add `SEED_DEMO=false` so the migration step does not create the demo shop. The compose file reads `.env` for the app and for its own settings, so nothing in it needs editing. Then run `docker compose up -d --build`. The app refuses to start while a required setting is missing; `docker compose logs app` names the variable.
 
 Create the owner account once, with `ALLOW_REGISTRATION=true` for a few minutes, at `/register`; then set it back to `false` and restart. Everyone else joins by invite from **Settings → Team**.
 

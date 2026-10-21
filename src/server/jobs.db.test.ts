@@ -34,4 +34,12 @@ describe("jobs (Postgres)", () => {
     await scheduleJob(shop.office, job.id, { assigneeUserId: shop.office.userId, scheduledAt: null });
     await expect(setJobStatus(shop.technician, job.id, "DONE")).rejects.toThrow(/someone else's job/);
   });
+
+  it("gives a technician's own note to them", async () => {
+    const shop = await makeShop();
+    const { job } = await saveJob(shop.technician, { note: "Fridge gas leak at the dhaba" }, parser);
+    expect(job.assigneeUserId).toBe(shop.technician.userId);
+    const { job: officeJob } = await saveJob(shop.office, { note: "Office note for later" }, parser);
+    expect(officeJob.assigneeUserId).toBeNull();
+  });
 });

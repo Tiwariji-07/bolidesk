@@ -10,7 +10,7 @@ import type { MessagingProvider } from "./integrations/types";
 import { createPortalToken } from "./portal";
 import { getPrisma } from "./prisma";
 import { invoiceBalance } from "./queries";
-import { logActivity, withStaffLock, withSystemLock } from "./workspace-tx";
+import { logActivity, withStaffLock } from "./workspace-tx";
 
 export type MessagePurpose = "invoice" | "reminder";
 const REDACTED = "(private link)";
@@ -21,6 +21,8 @@ const REDACTED = "(private link)";
  */
 export async function sendInvoiceMessage(access: Access, invoiceId: string, purpose: MessagePurpose, messaging: MessagingProvider) {
   const env = readEnvironment();
+  const name = purpose === "invoice" ? env.WHATSAPP_TEMPLATE_INVOICE : env.WHATSAPP_TEMPLATE_REMINDER;
+  // Reserve a QUEUED row under the lock first: a second sender (or a double tap) sees it and is refused.
   const prepared = await withStaffLock(access, "messages.send", async (tx, actor) => {
     const invoice = await tx.invoice.findFirst({ where: { id: invoiceId, workspaceId: actor.workspaceId }, include: { customer: true, workspace: { select: { brandName: true } }, payments: { select: { amountPaise: true } }, creditNote: { select: { totalPaise: true } } } });
     if (!invoice) throw new UserError("Invoice not found.");
@@ -30,26 +32,25 @@ export async function sendInvoiceMessage(access: Access, invoiceId: string, purp
     const recent = await tx.deliveryLog.findFirst({ where: { invoiceId, purpose, status: { not: "FAILED" }, createdAt: { gt: new Date(Date.now() - 2 * 60_000) } } });
     if (recent) throw new UserError("This message was sent a moment ago.");
     const portal = await createPortalToken(tx, { workspaceId: actor.workspaceId, customerId: invoice.customerId, invoiceId });
+    const values = [invoice.customer.name, invoice.workspace.brandName, invoice.number ?? "", formatINR(purpose === "invoice" ? invoice.totalPaise : due), portal.url];
+    const log = await tx.deliveryLog.create({ data: { workspaceId: actor.workspaceId, customerId: invoice.customerId, invoiceId, channel: "WHATSAPP", provider: messaging.name, recipient: invoice.customer.phone, template: name, purpose, status: "QUEUED", payloadJson: { type: "template", name, parameters: [...values.slice(0, 4), REDACTED] } as Prisma.InputJsonValue } });
     await logActivity(tx, actor, `WhatsApp ${purpose} for ${invoice.number} to ${formatPhone(invoice.customer.phone)}`);
-    return { invoice, due, url: portal.url, userId: actor.userId };
+    return { logId: log.id, to: whatsappRecipient(invoice.customer.phone), values };
   });
-  const { invoice } = prepared;
-  const name = purpose === "invoice" ? env.WHATSAPP_TEMPLATE_INVOICE : env.WHATSAPP_TEMPLATE_REMINDER;
-  const values = [invoice.customer.name, invoice.workspace.brandName, invoice.number ?? "", formatINR(purpose === "invoice" ? invoice.totalPaise : prepared.due), prepared.url];
-  const template = { name, languageCode: env.WHATSAPP_TEMPLATE_LANGUAGE, components: [{ type: "body", parameters: values.map((text) => ({ type: "text", text })) }] };
-  const logged = { type: "template", name, parameters: [...values.slice(0, 4), REDACTED] } as Prisma.InputJsonValue;
-  const base = { workspaceId: access.workspaceId, customerId: invoice.customerId, invoiceId, channel: "WHATSAPP" as const, provider: messaging.name, recipient: invoice.customer.phone, template: name, purpose, payloadJson: logged };
+  const template = { name, languageCode: env.WHATSAPP_TEMPLATE_LANGUAGE, components: [{ type: "body", parameters: prepared.values.map((text) => ({ type: "text", text })) }] };
+  let providerMessageId: string | undefined;
   try {
-    const result = await messaging.sendTemplate({ to: whatsappRecipient(invoice.customer.phone), template });
-    await withSystemLock(access.workspaceId, (tx) => tx.deliveryLog.create({ data: { ...base, status: "SENT", providerMessageId: result.providerMessageId, sentAt: new Date() } }));
-    return { status: "SENT" as const, demo: messaging.name === "demo" };
+    providerMessageId = (await messaging.sendTemplate({ to: prepared.to, template })).providerMessageId;
   } catch (error) {
-    await withSystemLock(access.workspaceId, (tx) => tx.deliveryLog.create({ data: { ...base, status: "FAILED", error: error instanceof Error ? error.message.slice(0, 300) : "Unknown delivery error" } }));
+    await getPrisma().deliveryLog.update({ where: { id: prepared.logId }, data: { status: "FAILED", error: error instanceof Error ? error.message.slice(0, 300) : "Unknown delivery error" } });
     throw new UserError("WhatsApp did not accept the message. Check the number, or use Open in WhatsApp instead.");
   }
+  // Recorded outside the try: once WhatsApp has accepted the message, a logging hiccup must not invite a resend.
+  await getPrisma().deliveryLog.update({ where: { id: prepared.logId }, data: { status: "SENT", providerMessageId, sentAt: new Date() } }).catch((error: unknown) => console.error("Delivery log update failed", error));
+  return { status: "SENT" as const, demo: messaging.name === "demo" };
 }
 
-const statusRank = { SENT: 1, DELIVERED: 2, READ: 3, FAILED: 4 } as const;
+const statusRank = { QUEUED: 0, SENT: 1, DELIVERED: 2, READ: 3, FAILED: 4 } as const;
 const statusPayload = z.object({ entry: z.array(z.object({ changes: z.array(z.object({ value: z.object({ statuses: z.array(z.object({ id: z.string(), status: z.string(), errors: z.array(z.object({ title: z.string().optional(), message: z.string().optional() })).optional() })).optional() }) })) })) });
 
 export function verifyMetaSignature(rawBody: string, header: string | null, appSecret: string) {

@@ -63,6 +63,8 @@ export const loginThrottle = {
     return Boolean(entry && entry.resetAt > now && entry.count >= MAX_FAILURES);
   },
   fail(key: string, now = Date.now()) {
+    // Many different emails must not grow memory without limit: drop finished windows once the map is large.
+    if (failures.size > 10_000) for (const [stale, value] of failures) if (value.resetAt <= now) failures.delete(stale);
     const entry = failures.get(key);
     if (!entry || entry.resetAt <= now) failures.set(key, { count: 1, resetAt: now + WINDOW_MS });
     else entry.count += 1;

@@ -24,7 +24,7 @@ export async function creditedPaise(tx: Tx, invoiceId: string) {
 }
 
 async function balanceInTx(tx: Tx, invoiceId: string, totalPaise: number): Promise<Balance> {
-  const [paid, credited] = await Promise.all([tx.payment.aggregate({ where: { invoiceId }, _sum: { amountPaise: true } }), creditedPaise(tx, invoiceId)]);
+  const paid = await tx.payment.aggregate({ where: { invoiceId }, _sum: { amountPaise: true } }); const credited = await creditedPaise(tx, invoiceId);
   return balanceOf(totalPaise, credited, paid._sum.amountPaise ?? 0);
 }
 
@@ -99,6 +99,8 @@ export async function reversePayment(access: Access, paymentId: string, reason: 
     if (!payment || payment.entryKind !== "RECEIPT") throw new UserError("Receipt not found.");
     if (payment.source !== "MANUAL") throw new UserError("Online payments cannot be reversed. Record a refund after returning the money.");
     if (payment.reversal) throw new UserError("This receipt was already reversed.");
+    const net = await tx.payment.aggregate({ where: { invoiceId: payment.invoiceId }, _sum: { amountPaise: true } });
+    if ((net._sum.amountPaise ?? 0) - payment.amountPaise < 0) throw new UserError("This money was already refunded, so the receipt cannot be reversed as well.");
     await tx.payment.create({ data: { workspaceId: actor.workspaceId, invoiceId: payment.invoiceId, entryKind: "REVERSAL", source: "MANUAL", amountPaise: -payment.amountPaise, method: payment.method, reversesPaymentId: payment.id, idempotencyKey: `reversal-${payment.id}`, recordedByUserId: actor.userId, reason: reason.trim() } });
     const settled = await settleInTx(tx, payment.invoiceId);
     await logActivity(tx, actor, `Receipt ${payment.receiptNumber} reversed on ${payment.invoice.number}: ${reason.trim()}`);
@@ -140,7 +142,9 @@ async function applyProviderPayment(tx: Tx, actor: Actor, requestId: string, pay
     return { recorded: false, staleRequestIds: [] as string[] };
   }
   if (payment.status !== "captured") return { recorded: false, staleRequestIds: [] as string[] };
-  if (request.lastError?.startsWith(LEGACY_MARKER)) {
+  // Hold only when the invoice's earlier PAID status is already in the ledger as an opening entry; otherwise the money is new.
+  const opening = request.lastError?.startsWith(LEGACY_MARKER) ? await tx.payment.findFirst({ where: { invoiceId: request.invoiceId, source: "LEGACY" }, select: { id: true } }) : null;
+  if (opening) {
     await logActivity(tx, actor, `Razorpay payment ${payment.id} (${formatINR(payment.amount)}) arrived on a link from before the payments ledger for ${request.invoice.number}. Not recorded automatically: check it against the earlier paid status.`);
     return { recorded: false, staleRequestIds: [] as string[] };
   }
@@ -148,8 +152,10 @@ async function applyProviderPayment(tx: Tx, actor: Actor, requestId: string, pay
     await logActivity(tx, actor, `Razorpay payment ${payment.id} on ${request.invoice.number} needs review: ${payment.currency} ${payment.amount} paise against a ${request.amountPaise} paise link. Not recorded.`);
     return { recorded: false, staleRequestIds: [] as string[] };
   }
-  const receiptNumber = await allocateNumber(tx, await tx.workspace.findUniqueOrThrow({ where: { id: request.workspaceId } }), "RECEIPT", businessDate());
-  await tx.payment.create({ data: { workspaceId: request.workspaceId, invoiceId: request.invoiceId, paymentRequestId: request.id, entryKind: "RECEIPT", source: "RAZORPAY", method: "RAZORPAY", amountPaise: payment.amount, providerPaymentId: payment.id, receiptNumber, idempotencyKey: `razorpay-${payment.id}` } });
+  const receiptNumber = await allocateNumber(tx, await tx.workspace.findUniqueOrThrow({ where: { id: request.workspaceId } }), "RECEIPT", businessDate(payment.createdAt ? new Date(payment.createdAt * 1000) : new Date()));
+  // Booked at Razorpay's payment time, so a 23:55 payment whose webhook arrives after midnight stays on its own day.
+  const occurredAt = payment.createdAt ? new Date(payment.createdAt * 1000) : new Date();
+  await tx.payment.create({ data: { workspaceId: request.workspaceId, invoiceId: request.invoiceId, paymentRequestId: request.id, entryKind: "RECEIPT", source: "RAZORPAY", method: "RAZORPAY", amountPaise: payment.amount, providerPaymentId: payment.id, receiptNumber, idempotencyKey: `razorpay-${payment.id}`, occurredAt } });
   const settled = await settleInTx(tx, request.invoiceId);
   await logActivity(tx, actor, `${formatINR(payment.amount)} received online for ${request.invoice.number} (receipt ${receiptNumber})`);
   return { recorded: true, staleRequestIds: settled.staleRequestIds };
@@ -267,7 +273,7 @@ export async function createPaymentRequest(access: Access, invoiceId: string, pr
     }
 
     const activated = await withSystemLock(access.workspaceId, async (tx) => {
-      const [request, invoice] = await Promise.all([tx.paymentRequest.findUniqueOrThrow({ where: { id: step.request.id } }), tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } })]);
+      const request = await tx.paymentRequest.findUniqueOrThrow({ where: { id: step.request.id } }); const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
       const due = (await balanceInTx(tx, invoiceId, invoice.totalPaise)).due;
       const stillValid = request.status === "PENDING" && invoice.status === "SENT" && due === request.amountPaise;
       await tx.paymentRequest.update({ where: { id: request.id }, data: { providerPaymentLinkId: link.id, url: link.url, status: stillValid ? "ACTIVE" : "CANCELLING" } });

@@ -12,7 +12,6 @@ function fakeWhatsApp(fail = false) {
   const sent: { to: string; template: { components?: unknown[] } }[] = [];
   const provider: MessagingProvider = {
     name: "whatsapp-cloud",
-    sendText: async () => ({ payload: {} }),
     sendTemplate: async (input) => { if (fail) throw new Error("(#131026) Message undeliverable"); sent.push(input); return { providerMessageId: `wamid.${Math.random()}`, payload: input }; },
   };
   return { provider, sent };
@@ -60,5 +59,13 @@ describe("WhatsApp delivery (Postgres)", () => {
     expect(verifyMetaSignature(body, `sha256=${createHmac("sha256", "app-secret").update(body).digest("hex")}`, "app-secret")).toBe(true);
     expect(verifyMetaSignature(body, "sha256=00", "app-secret")).toBe(false);
     expect(verifyMetaSignature(body, null, "app-secret")).toBe(false);
+  });
+
+  it("sends one message when two people tap send at the same time", async () => {
+    const { shop, invoice } = await issued();
+    const whatsapp = fakeWhatsApp();
+    const results = await Promise.allSettled([sendInvoiceMessage(shop.office, invoice.id, "invoice", whatsapp.provider), sendInvoiceMessage(shop.owner, invoice.id, "invoice", whatsapp.provider)]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(whatsapp.sent).toHaveLength(1);
   });
 });

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { localJobNoteParser } from "../../domain/job-note";
 import { readEnvironment, type AppEnvironment } from "../env";
 import { OpenAiStructuredJobParser } from "./openai";
@@ -12,8 +13,7 @@ class DemoJobParser implements JobParserProvider {
 
 class DemoMessagingProvider implements MessagingProvider {
   readonly name = "demo";
-  async sendText(input: { to: string; body: string }): Promise<DeliveryResult> { return { providerMessageId: `demo-${Date.now()}`, payload: { type: "text", ...input } }; }
-  async sendTemplate(input: { to: string; template: { name: string; languageCode: string; components?: unknown[] } }): Promise<DeliveryResult> { return { providerMessageId: `demo-${Date.now()}`, payload: { type: "template", ...input } }; }
+  async sendTemplate(input: { to: string; template: { name: string; languageCode: string; components?: unknown[] } }): Promise<DeliveryResult> { return { providerMessageId: `demo-${randomUUID()}`, payload: { type: "template", ...input } }; }
 }
 
 /** Demo links have no payable URL; nothing is collected and no status ever changes from them. */

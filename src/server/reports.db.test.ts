@@ -27,10 +27,10 @@ describe("reports (Postgres)", () => {
     const issueDay = fresh.issueDate!.toISOString().slice(0, 10);
     const csv = await salesRegisterCsv(shop.workspace.id, issueDay, issueDay);
     const lines = csv.trim().split("\r\n");
-    expect(lines[0]).toBe("Type,Number,Date,Against invoice,Customer,Customer GSTIN,Place of supply,Taxable value,CGST,SGST,IGST,Total");
+    expect(lines[0]).toBe("Type,Number,Date,Against invoice,Customer,Customer GSTIN,Place of supply,Taxable value,CGST,SGST,IGST,GST not split,Total");
     expect(lines[1]).toContain(`Tax invoice,${invoice.number}`);
     expect(lines[1]).toContain(`"'=HYPERLINK(""x"")"`);
-    expect(lines[1]).toContain("1000.00,90.00,90.00,0.00,1180.00");
-    expect(lines[2]).toMatch(/^Credit note,BDC-.*-1000\.00,-90\.00,-90\.00,0\.00,-1180\.00$/);
+    expect(lines[1]).toContain("1000.00,90.00,90.00,0.00,0.00,1180.00");
+    expect(lines[2]).toMatch(/^Credit note,BDC-.*-1000\.00,-90\.00,-90\.00,0\.00,0\.00,-1180\.00$/);
   });
 });

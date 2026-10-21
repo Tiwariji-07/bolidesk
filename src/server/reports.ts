@@ -19,7 +19,7 @@ export async function dayBook(workspaceId: string, day: IsoDate) {
     payments, invoices, creditNotes,
     collected: sum(payments, (payment) => payment.amountPaise),
     byMethod: [...byMethod.entries()].sort((a, b) => b[1] - a[1]),
-    billed: { taxable: sum(invoices, (invoice) => invoice.subtotalPaise), cgst: sum(invoices, (invoice) => invoice.cgstPaise), sgst: sum(invoices, (invoice) => invoice.sgstPaise), igst: sum(invoices, (invoice) => invoice.igstPaise), total: sum(invoices, (invoice) => invoice.totalPaise) },
+    billed: { taxable: sum(invoices, (invoice) => invoice.subtotalPaise), cgst: sum(invoices, (invoice) => invoice.cgstPaise), sgst: sum(invoices, (invoice) => invoice.sgstPaise), igst: sum(invoices, (invoice) => invoice.igstPaise), unsplit: sum(invoices, unsplitGst), total: sum(invoices, (invoice) => invoice.totalPaise) },
     credited: sum(creditNotes, (note) => note.totalPaise),
   };
 }
@@ -39,6 +39,9 @@ export async function receivablesAgeing(workspaceId: string, at = new Date()) {
   return buckets;
 }
 
+/** Invoices issued before tax heads were stored keep their GST total but not its CGST/SGST/IGST split. */
+const unsplitGst = (invoice: { taxPaise: number; cgstPaise: number; sgstPaise: number; igstPaise: number }) => invoice.taxPaise - invoice.cgstPaise - invoice.sgstPaise - invoice.igstPaise;
+
 const csvCell = (value: string | number | null | undefined) => {
   const text = value === null || value === undefined ? "" : String(value);
   // Text starting with = + - @ would run as a formula in spreadsheet apps; plain numbers like -90.00 stay numbers.
@@ -55,11 +58,12 @@ export async function salesRegisterCsv(workspaceId: string, from: IsoDate, to: I
     db.invoice.findMany({ where: { workspaceId, issueDate: range, status: { not: "DRAFT" } }, orderBy: [{ issueDate: "asc" }, { number: "asc" }] }),
     db.creditNote.findMany({ where: { workspaceId, issueDate: range }, include: { invoice: { select: { number: true, placeOfSupply: true, buyerSnapshot: true, documentType: true } } }, orderBy: [{ issueDate: "asc" }, { number: "asc" }] }),
   ]);
-  const header = ["Type", "Number", "Date", "Against invoice", "Customer", "Customer GSTIN", "Place of supply", "Taxable value", "CGST", "SGST", "IGST", "Total"];
+  // "GST not split" is non-zero only for invoices from before tax heads were stored; the accountant allocates it.
+  const header = ["Type", "Number", "Date", "Against invoice", "Customer", "Customer GSTIN", "Place of supply", "Taxable value", "CGST", "SGST", "IGST", "GST not split", "Total"];
   const buyer = (snapshot: unknown) => (snapshot ?? {}) as { name?: string; gstin?: string | null };
   const rows = [
-    ...invoices.map((invoice) => [invoice.documentType === "BILL_OF_SUPPLY" ? "Bill of supply" : "Tax invoice", invoice.number, invoice.issueDate ? toIsoDate(invoice.issueDate) : "", "", buyer(invoice.buyerSnapshot).name, buyer(invoice.buyerSnapshot).gstin, invoice.placeOfSupply, rupees(invoice.subtotalPaise), rupees(invoice.cgstPaise), rupees(invoice.sgstPaise), rupees(invoice.igstPaise), rupees(invoice.totalPaise)]),
-    ...notes.map((note) => ["Credit note", note.number, toIsoDate(note.issueDate), note.invoice.number, buyer(note.invoice.buyerSnapshot).name, buyer(note.invoice.buyerSnapshot).gstin, note.invoice.placeOfSupply, rupees(-note.subtotalPaise), rupees(-note.cgstPaise), rupees(-note.sgstPaise), rupees(-note.igstPaise), rupees(-note.totalPaise)]),
+    ...invoices.map((invoice) => [invoice.documentType === "BILL_OF_SUPPLY" ? "Bill of supply" : "Tax invoice", invoice.number, invoice.issueDate ? toIsoDate(invoice.issueDate) : "", "", buyer(invoice.buyerSnapshot).name, buyer(invoice.buyerSnapshot).gstin, invoice.placeOfSupply, rupees(invoice.subtotalPaise), rupees(invoice.cgstPaise), rupees(invoice.sgstPaise), rupees(invoice.igstPaise), rupees(unsplitGst(invoice)), rupees(invoice.totalPaise)]),
+    ...notes.map((note) => ["Credit note", note.number, toIsoDate(note.issueDate), note.invoice.number, buyer(note.invoice.buyerSnapshot).name, buyer(note.invoice.buyerSnapshot).gstin, note.invoice.placeOfSupply, rupees(-note.subtotalPaise), rupees(-note.cgstPaise), rupees(-note.sgstPaise), rupees(-note.igstPaise), rupees(0), rupees(-note.totalPaise)]),
   ];
   return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }

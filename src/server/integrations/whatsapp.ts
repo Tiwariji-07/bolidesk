@@ -5,10 +5,6 @@ export class WhatsAppCloudProvider implements MessagingProvider {
   readonly name = "whatsapp-cloud";
   constructor(private readonly accessToken: string, private readonly phoneNumberId: string, private readonly apiVersion: string, private readonly fetcher: Fetcher = fetch) {}
 
-  sendText(input: { to: string; body: string }): Promise<DeliveryResult> {
-    return this.send({ messaging_product: "whatsapp", to: input.to, type: "text", text: { body: input.body } });
-  }
-
   sendTemplate(input: { to: string; template: WhatsAppTemplate }): Promise<DeliveryResult> {
     return this.send({ messaging_product: "whatsapp", to: input.to, type: "template", template: { name: input.template.name, language: { code: input.template.languageCode }, ...(input.template.components ? { components: input.template.components } : {}) } });
   }

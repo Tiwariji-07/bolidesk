@@ -4,7 +4,6 @@ import { balanceOf } from "@/domain/documents";
 import { formatINR } from "@/lib/format";
 import type { Access } from "./access";
 import { UserError } from "./errors";
-import { getPrisma } from "./prisma";
 import { logActivity, withStaffLock, withSystemLock } from "./workspace-tx";
 
 export const followUpInputSchema = z.object({
@@ -53,19 +52,22 @@ export async function ensureOverdueFollowUps(workspaceId: string, now = new Date
   if (now.getTime() - (lastSync.get(workspaceId) ?? 0) < 60_000) return;
   lastSync.set(workspaceId, now.getTime());
   const today = dateOnly(businessDate(now));
-  const candidates = await getPrisma().invoice.findMany({
-    where: { workspaceId, status: "SENT", dueDate: { lt: today }, followUp: null },
-    select: { id: true, number: true, totalPaise: true, dueDate: true, customer: { select: { name: true } }, payments: { select: { amountPaise: true } }, creditNote: { select: { totalPaise: true } } },
+  // Candidates are read inside the lock, so an invoice paid or credited a moment ago is not given a reminder.
+  await withSystemLock(workspaceId, async (tx) => {
+    const candidates = await tx.invoice.findMany({
+      where: { workspaceId, status: "SENT", dueDate: { lt: today }, followUp: null },
+      select: { id: true, number: true, totalPaise: true, dueDate: true, customer: { select: { name: true } }, payments: { select: { amountPaise: true } }, creditNote: { select: { totalPaise: true } } },
+    });
+    const overdue = candidates.filter((invoice) => balanceOf(invoice.totalPaise, invoice.creditNote?.totalPaise ?? 0, invoice.payments.reduce((sum, payment) => sum + payment.amountPaise, 0)).due > 0);
+    if (!overdue.length) return;
+    await tx.followUp.createMany({
+      skipDuplicates: true,
+      data: overdue.map((invoice) => ({
+        workspaceId, invoiceId: invoice.id,
+        subject: `${invoice.number} · ${invoice.customer.name}`,
+        action: `Payment overdue (${formatINR(invoice.totalPaise)} invoice). Send a reminder with the payment link.`,
+        dueAt: istInstant(addDays(toIsoDate(invoice.dueDate!), 1), 9),
+      })),
+    });
   });
-  const overdue = candidates.filter((invoice) => balanceOf(invoice.totalPaise, invoice.creditNote?.totalPaise ?? 0, invoice.payments.reduce((sum, payment) => sum + payment.amountPaise, 0)).due > 0);
-  if (!overdue.length) return;
-  await withSystemLock(workspaceId, (tx) => tx.followUp.createMany({
-    skipDuplicates: true,
-    data: overdue.map((invoice) => ({
-      workspaceId, invoiceId: invoice.id,
-      subject: `${invoice.number} · ${invoice.customer.name}`,
-      action: `Payment overdue (${formatINR(invoice.totalPaise)} invoice). Send a reminder with the payment link.`,
-      dueAt: istInstant(addDays(toIsoDate(invoice.dueDate!), 1), 9),
-    })),
-  }));
 }

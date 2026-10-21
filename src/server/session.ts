@@ -34,6 +34,8 @@ export async function sessionToken() {
 
 export async function startSession(membershipId: string, db: Db = getPrisma()) {
   const token = randomBytes(32).toString("base64url");
+  const longAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  await db.session.deleteMany({ where: { membershipId, OR: [{ expiresAt: { lt: longAgo } }, { revokedAt: { lt: longAgo } }] } });
   await db.session.create({ data: { tokenHash: hashSessionToken(token), membershipId, expiresAt: new Date(Date.now() + SESSION_LIFETIME_SECONDS * 1000) } });
   (await cookies()).set(SESSION_COOKIE_NAME, token, { ...cookieOptions(), maxAge: SESSION_LIFETIME_SECONDS });
 }
