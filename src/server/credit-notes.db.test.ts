@@ -38,7 +38,7 @@ describe("credit notes (Postgres)", () => {
     expect(result.refundDuePaise).toBe(50000);
     expect([...razorpay.links.values()].every((link) => link.status === "cancelled")).toBe(true);
     await expect(recordPayment(shop.office, { invoiceId: invoice.id, amount: "1", method: "CASH", idempotencyKey: `cn2-${invoice.id}` })).rejects.toThrow(/credit note/);
-    await recordRefund(shop.owner, { invoiceId: invoice.id, amount: "500", method: "CASH", reference: "", reason: "Job not done" });
-    await expect(recordRefund(shop.owner, { invoiceId: invoice.id, amount: "1", method: "CASH", reference: "", reason: "again" })).rejects.toThrow(/Only ₹0/);
+    await recordRefund(shop.owner, { invoiceId: invoice.id, amount: "500", method: "CASH", reference: "", reason: "Job not done" , idempotencyKey: `r1-${invoice.id}` });
+    await expect(recordRefund(shop.owner, { invoiceId: invoice.id, amount: "1", method: "CASH", reference: "", reason: "again" , idempotencyKey: `r2-${invoice.id}` })).rejects.toThrow(/Only ₹0/);
   });
 });

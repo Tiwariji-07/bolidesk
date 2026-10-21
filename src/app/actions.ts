@@ -10,7 +10,7 @@ import { issueCreditNote } from "@/server/credit-notes";
 import { sendInvoiceMessage, type MessagePurpose } from "@/server/delivery";
 import { completeFollowUp, createFollowUp, snoozeFollowUp } from "@/server/followups";
 import { createProviders } from "@/server/integrations/providers";
-import { createPaymentRequest, recordPayment, recordRefund, reversePayment } from "@/server/payments";
+import { createPaymentRequest, recordPayment, recordRefund, retryStuckRequests, reversePayment } from "@/server/payments";
 import { sharePortalLink } from "@/server/portal";
 
 const refresh = (...paths: string[]) => paths.forEach((path) => revalidatePath(path));
@@ -142,7 +142,15 @@ export async function reversePaymentAction(paymentId: string, invoiceId: string,
   });
 }
 
-export async function recordRefundAction(values: { invoiceId: string; amount: string; method: "CASH" | "UPI" | "CARD" | "BANK"; reference: string; reason: string }) {
+export async function retryPaymentLinksAction(invoiceId: string) {
+  return attempt(async () => {
+    const remaining = await retryStuckRequests(await requireAccess("payments.request"), id(invoiceId, "Invoice"), createProviders().payments);
+    refresh(`/invoices/${invoiceId}`);
+    if (remaining) throw new UserError("Razorpay is still not answering. Try again in a few minutes.");
+  });
+}
+
+export async function recordRefundAction(values: { invoiceId: string; amount: string; method: "CASH" | "UPI" | "CARD" | "BANK"; reference: string; reason: string; idempotencyKey: string }) {
   return attempt(async () => {
     const method = z.enum(["CASH", "UPI", "CARD", "BANK"]).parse(values.method);
     await recordRefund(await requireAccess("payments.correct"), { ...values, method });

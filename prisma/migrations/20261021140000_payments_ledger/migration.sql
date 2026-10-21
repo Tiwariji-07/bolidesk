@@ -58,7 +58,7 @@ ALTER TABLE "PaymentRequest"
   ADD COLUMN "status" "PaymentRequestStatus" NOT NULL DEFAULT 'PENDING',
   ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ALTER COLUMN "url" DROP NOT NULL;
-UPDATE "PaymentRequest" SET "status" = 'EXPIRED', "url" = CASE WHEN "provider" = 'DEMO' THEN NULL ELSE "url" END;
+UPDATE "PaymentRequest" SET "status" = 'EXPIRED', "lastError" = 'legacy: closed by the payments-ledger migration', "url" = CASE WHEN "provider" = 'DEMO' THEN NULL ELSE "url" END;
 ALTER TABLE "PaymentRequest" ALTER COLUMN "updatedAt" DROP DEFAULT;
 UPDATE "CustomerPortalToken" SET "revokedAt" = CURRENT_TIMESTAMP WHERE "revokedAt" IS NULL AND "invoiceId" IN (SELECT "invoiceId" FROM "PaymentRequest");
 UPDATE "DeliveryLog" SET "payloadJson" = regexp_replace("payloadJson"::text, '/p/[A-Za-z0-9_-]{32,}', '/p/REDACTED', 'g')::jsonb;

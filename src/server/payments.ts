@@ -14,6 +14,8 @@ import { createPortalToken, PORTAL_LIFETIME_MS } from "./portal";
 import { logActivity, withStaffLock, withSystemLock, type Actor, type Tx } from "./workspace-tx";
 
 const LIVE = ["PENDING", "ACTIVE", "CANCELLING"] as const;
+/** Requests closed by the ledger migration: their payments may already be in a LEGACY opening entry. */
+const LEGACY_MARKER = "legacy:";
 
 /** Credit notes reduce what is owed. */
 export async function creditedPaise(tx: Tx, invoiceId: string) {
@@ -66,7 +68,8 @@ export async function recordPayment(access: Access, raw: z.input<typeof paymentI
     const existing = await tx.payment.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId: actor.workspaceId, idempotencyKey: input.idempotencyKey } } });
     if (existing) {
       if (existing.invoiceId !== input.invoiceId || existing.amountPaise !== amount || existing.method !== input.method) throw new ConflictError("This form was already used for a different payment. Reload and try again.");
-      return { payment: existing, staleRequestIds: [] as string[], balance: await balanceInTx(tx, existing.invoiceId, (await tx.invoice.findUniqueOrThrow({ where: { id: existing.invoiceId } })).totalPaise) };
+      const stuck = await tx.paymentRequest.findMany({ where: { invoiceId: existing.invoiceId, status: "CANCELLING" }, select: { id: true } });
+      return { payment: existing, staleRequestIds: stuck.map((request) => request.id), balance: await balanceInTx(tx, existing.invoiceId, (await tx.invoice.findUniqueOrThrow({ where: { id: existing.invoiceId } })).totalPaise) };
     }
     let invoice = await tx.invoice.findFirst({ where: { id: input.invoiceId, workspaceId: actor.workspaceId } });
     if (!invoice) throw new UserError("Invoice not found.");
@@ -105,16 +108,21 @@ export async function reversePayment(access: Access, paymentId: string, reason: 
 }
 
 /** Owner only, after the money has actually gone back to the customer. Limited to what was overpaid or credited. */
-export function recordRefund(access: Access, input: { invoiceId: string; amount: string; method: Exclude<PaymentMethod, "RAZORPAY">; reference: string; reason: string }) {
+export function recordRefund(access: Access, input: { invoiceId: string; amount: string; method: Exclude<PaymentMethod, "RAZORPAY">; reference: string; reason: string; idempotencyKey: string }) {
   const amount = parseRupees(input.amount);
   if (!amount) throw new UserError("Enter the amount refunded.");
   if (input.reason.trim().length < 3) throw new UserError("Say why the money was refunded.");
   return withStaffLock(access, "payments.correct", async (tx, actor) => {
+    const existing = await tx.payment.findUnique({ where: { workspaceId_idempotencyKey: { workspaceId: actor.workspaceId, idempotencyKey: `refund-${input.idempotencyKey}` } } });
+    if (existing) {
+      if (existing.invoiceId !== input.invoiceId || existing.amountPaise !== -amount) throw new ConflictError("This form was already used for a different refund. Reload and try again.");
+      return;
+    }
     const invoice = await tx.invoice.findFirst({ where: { id: input.invoiceId, workspaceId: actor.workspaceId } });
     if (!invoice) throw new UserError("Invoice not found.");
     const balance = await balanceInTx(tx, invoice.id, invoice.totalPaise);
     if (amount > balance.refundDue) throw new UserError(`Only ${formatINR(balance.refundDue)} can be refunded on this invoice.`);
-    await tx.payment.create({ data: { workspaceId: actor.workspaceId, invoiceId: invoice.id, entryKind: "REFUND", source: "MANUAL", amountPaise: -amount, method: input.method, reference: input.reference.trim() || null, idempotencyKey: `refund-${randomBytes(9).toString("base64url")}`, recordedByUserId: actor.userId, reason: input.reason.trim() } });
+    await tx.payment.create({ data: { workspaceId: actor.workspaceId, invoiceId: invoice.id, entryKind: "REFUND", source: "MANUAL", amountPaise: -amount, method: input.method, reference: input.reference.trim() || null, idempotencyKey: `refund-${input.idempotencyKey}`, recordedByUserId: actor.userId, reason: input.reason.trim() } });
     await settleInTx(tx, invoice.id);
     await logActivity(tx, actor, `${formatINR(amount)} refunded on ${invoice.number}: ${input.reason.trim()}`);
   });
@@ -132,6 +140,10 @@ async function applyProviderPayment(tx: Tx, actor: Actor, requestId: string, pay
     return { recorded: false, staleRequestIds: [] as string[] };
   }
   if (payment.status !== "captured") return { recorded: false, staleRequestIds: [] as string[] };
+  if (request.lastError?.startsWith(LEGACY_MARKER)) {
+    await logActivity(tx, actor, `Razorpay payment ${payment.id} (${formatINR(payment.amount)}) arrived on a link from before the payments ledger for ${request.invoice.number}. Not recorded automatically: check it against the earlier paid status.`);
+    return { recorded: false, staleRequestIds: [] as string[] };
+  }
   if (payment.currency !== "INR" || payment.amount <= 0 || payment.amount > request.amountPaise) {
     await logActivity(tx, actor, `Razorpay payment ${payment.id} on ${request.invoice.number} needs review: ${payment.currency} ${payment.amount} paise against a ${request.amountPaise} paise link. Not recorded.`);
     return { recorded: false, staleRequestIds: [] as string[] };
@@ -155,8 +167,17 @@ export async function cancelStaleRequests(workspaceId: string, requestIds: strin
   for (const requestId of requestIds) {
     const request = await withSystemLock(workspaceId, (tx) => tx.paymentRequest.findUnique({ where: { id: requestId } }));
     if (!request || request.status !== "CANCELLING") continue;
+    // Demo links never existed anywhere else; close them here, including after switching to live mode.
+    if (request.provider === "DEMO") {
+      await withSystemLock(workspaceId, (tx) => tx.paymentRequest.updateMany({ where: { id: request.id, status: "CANCELLING" }, data: { status: "CANCELLED" } }));
+      continue;
+    }
+    if (provider.name !== "razorpay") continue;
     try {
-      let state = request.providerPaymentLinkId ? await provider.fetchPaymentLink(request.providerPaymentLinkId) : await provider.findPaymentLink(request.reference);
+      // The list-by-reference answer may omit payments, so always read the link itself before deciding.
+      const found = request.providerPaymentLinkId ? null : await provider.findPaymentLink(request.reference);
+      const linkId = request.providerPaymentLinkId ?? found?.id;
+      let state = linkId ? await provider.fetchPaymentLink(linkId) : null;
       if (state) {
         await importProviderPayments(workspaceId, request.id, state.payments);
         if (state.status === "created" || state.status === "partially_paid") {
@@ -175,11 +196,22 @@ export async function cancelStaleRequests(workspaceId: string, requestIds: strin
   }
 }
 
+/** Staff retry for a link that could not be cancelled (for example Razorpay was down when cash was recorded). */
+export async function retryStuckRequests(access: Access, invoiceId: string, provider: PaymentProvider) {
+  const stuck = await withStaffLock(access, "payments.request", (tx, actor) => tx.paymentRequest.findMany({ where: { workspaceId: actor.workspaceId, invoiceId, status: { in: ["CANCELLING", "PENDING"] } }, select: { id: true, status: true } }));
+  for (const request of stuck) {
+    if (request.status === "PENDING") await reconcilePending(access.workspaceId, request.id, provider);
+    else await cancelStaleRequests(access.workspaceId, [request.id], provider);
+  }
+  return withStaffLock(access, "payments.request", (tx) => tx.paymentRequest.count({ where: { invoiceId, status: { in: ["CANCELLING", "PENDING"] } } }));
+}
+
 /** Finishes a PENDING request whose provider call timed out: attach the link if Razorpay made one, otherwise mark it failed. */
 async function reconcilePending(workspaceId: string, requestId: string, provider: PaymentProvider) {
   const request = await withSystemLock(workspaceId, (tx) => tx.paymentRequest.findUnique({ where: { id: requestId } }));
   if (!request || request.status !== "PENDING") return;
-  const state = provider.name === "demo" ? null : await provider.findPaymentLink(request.reference);
+  const found = provider.name === "demo" ? null : await provider.findPaymentLink(request.reference);
+  const state = found ? await provider.fetchPaymentLink(found.id) : null;
   if (state) await importProviderPayments(workspaceId, request.id, state.payments);
   await withSystemLock(workspaceId, async (tx) => {
     if (state) return tx.paymentRequest.updateMany({ where: { id: request.id, status: "PENDING" }, data: { status: "CANCELLING", providerPaymentLinkId: state.id, url: state.url } });

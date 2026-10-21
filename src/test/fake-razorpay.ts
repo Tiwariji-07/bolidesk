@@ -6,6 +6,7 @@ export class FakeRazorpay implements PaymentProvider {
   readonly name = "razorpay" as const;
   readonly links = new Map<string, PaymentLinkState & { expireBy: number }>();
   failNextCreate: "timeout-after-create" | "reject" | null = null;
+  failCancels = false;
 
   async createPaymentLink(input: PaymentLinkInput) {
     if (this.failNextCreate === "reject") { this.failNextCreate = null; throw new ProviderRejectedError("rejected"); }
@@ -15,9 +16,10 @@ export class FakeRazorpay implements PaymentProvider {
     if (this.failNextCreate === "timeout-after-create") { this.failNextCreate = null; throw new Error("socket timeout"); }
     return { id, url: `https://rzp.io/i/${id}` };
   }
-  async findPaymentLink(reference: string) { return [...this.links.values()].find((link) => link.reference === reference) ?? null; }
+  /** Like Razorpay's list endpoint, the summary omits payments; callers must fetch the link itself. */
+  async findPaymentLink(reference: string) { const link = [...this.links.values()].find((item) => item.reference === reference); return link ? { ...link, payments: [] } : null; }
   async fetchPaymentLink(id: string) { const link = this.links.get(id); if (!link) throw new Error("not found"); return link; }
-  async cancelPaymentLink(id: string) { const link = this.links.get(id); if (link && link.status === "created") link.status = "cancelled"; }
+  async cancelPaymentLink(id: string) { if (this.failCancels) throw new Error("Razorpay unavailable"); const link = this.links.get(id); if (link && link.status === "created") link.status = "cancelled"; }
   verifyWebhook(rawBody: string, signature: string | null) { return signature === sign(rawBody); }
   parseWebhook(payload: unknown): PaymentWebhookEvent { return payload as PaymentWebhookEvent; }
 

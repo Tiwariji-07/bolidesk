@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useDraftGuard } from "./draft-guard";
 import { useRouter } from "next/navigation";
 import { issueInvoiceAction, moveQuoteAction, saveInvoiceDraftAction, saveQuoteDraftAction } from "@/app/actions";
 import { calculateDocument, STATES, taxModeFor, type DocumentLine, type GstScheme } from "@/domain/gst";
@@ -22,6 +23,9 @@ export function LineEditor({ kind, id, version, lines, dueDate, placeOfSupply, p
   const [pos, setPos] = useState(placeOfSupply ?? seller.stateCode ?? "");
   const [terms, setTerms] = useState(paymentTerms ?? "");
   const [error, setError] = useState(""); const [saved, setSaved] = useState(false); const [dirty, setDirty] = useState(false);
+  const edits = useRef(0);
+  const guard = useDraftGuard();
+  useEffect(() => { guard?.setDirty(dirty); }, [dirty, guard]);
   const [pending, startTransition] = useTransition();
   const mode = taxModeFor(seller.gstScheme, seller.stateCode, pos || seller.stateCode);
 
@@ -30,18 +34,21 @@ export function LineEditor({ kind, id, version, lines, dueDate, placeOfSupply, p
     return calculateDocument(parsed, mode);
   }, [rows, mode]);
 
-  const touch = () => { setSaved(false); setDirty(true); };
+  const touch = () => { edits.current += 1; setSaved(false); setDirty(true); };
   const update = (key: number, field: keyof Omit<Row, "key">, value: string) => { touch(); setRows((current) => current.map((row) => row.key === key ? { ...row, [field]: value } : row)); };
   const add = () => { touch(); setRows((current) => [...current, { key: nextKey++, description: "", quantity: "1", unitPrice: "", taxRate: String(defaultRate), code: defaultCode ?? "" }]); };
   const remove = (key: number) => { touch(); setRows((current) => current.length > 1 ? current.filter((row) => row.key !== key) : current); };
 
   function save() {
     setError(""); setSaved(false);
+    const editsAtSave = edits.current;
     startTransition(async () => {
       const input = { id, version, lines: rows.map(({ description, quantity, unitPrice, taxRate, code }) => ({ description, quantity, unitPrice, taxRate, code })), dueDate: due || undefined, placeOfSupply: pos || undefined, paymentTerms: terms || undefined };
       const result = kind === "quote" ? await saveQuoteDraftAction(input) : await saveInvoiceDraftAction(input);
       if (!result.ok) return setError(result.error);
-      setSaved(true); setDirty(false);
+      // Edits typed while this save ran are not in it, so they keep the draft "unsaved".
+      const unchanged = edits.current === editsAtSave;
+      setSaved(unchanged); setDirty(!unchanged);
       router.refresh();
     });
   }

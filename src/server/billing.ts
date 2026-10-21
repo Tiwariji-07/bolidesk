@@ -42,6 +42,13 @@ export function storedLines(json: Prisma.JsonValue): DocumentLine[] {
   return Array.isArray(json) ? (json as DocumentLine[]) : [];
 }
 
+/** What a quote shows: frozen heads once sent; recorded totals for quotes sent before freezing existed; live maths for drafts. */
+export function quoteTotals(quote: { status: string; linesJson: Prisma.JsonValue; placeOfSupply: string | null; subtotalPaise: number; taxPaise: number; totalPaise: number }, workspace: Pick<Workspace, "gstScheme" | "stateCode">) {
+  const lines = storedLines(quote.linesJson);
+  if (quote.status === "DRAFT") return calculateDocument(lines, workspaceMode(workspace, quote.placeOfSupply));
+  return frozenHeads(quote.linesJson) ?? { lines: lines as CalculatedLine[], subtotal: quote.subtotalPaise, cgst: 0, sgst: 0, igst: 0, tax: quote.taxPaise, total: quote.totalPaise };
+}
+
 /** Tax heads of a frozen document (sent quote, issued invoice): summed from its stored calculated lines. */
 export function frozenHeads(json: Prisma.JsonValue) {
   const lines = storedLines(json) as CalculatedLine[];

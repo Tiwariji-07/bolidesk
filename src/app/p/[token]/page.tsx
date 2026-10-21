@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { buyerFromSnapshot, DocumentView, sellerFromSnapshot } from "@/components/document-view";
-import { calculateDocument } from "@/domain/gst";
 import { formatDay, formatINR } from "@/lib/format";
-import { frozenHeads, storedLines, workspaceMode, type BuyerSnapshot, type SellerSnapshot } from "@/server/billing";
+import { quoteTotals, storedLines, type BuyerSnapshot, type SellerSnapshot } from "@/server/billing";
 import { resolvePortalToken } from "@/server/portal";
 import { getPrisma } from "@/server/prisma";
 import { getWorkspace, invoiceBalance } from "@/server/queries";
@@ -35,8 +34,7 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
     </section></main>;
   }
   if (!quote || quote.status === "DRAFT") notFound();
-  const lines = storedLines(quote.linesJson);
-  const totals = frozenHeads(quote.linesJson) ?? calculateDocument(lines, workspaceMode(workspace, quote.placeOfSupply));
+  const totals = quoteTotals(quote, workspace);
   return <main id="main-content" className="portal-page"><section className="portal-wide">
     <p className="eyebrow">{workspace.brandName}</p><h1>Quote {quote.number}</h1><p>Hello {portal.customer.name}, here is our quote. Reply on WhatsApp to go ahead.</p>
     <DocumentView title="Quotation" number={quote.number} issued={quote.createdAt} due={quote.dueDate} seller={{ name: workspace.legalName ?? workspace.name, tradeName: workspace.brandName, address: workspace.address, stateCode: workspace.stateCode, gstin: workspace.gstScheme === "UNREGISTERED" ? null : workspace.gstin }} buyer={{ name: portal.customer.name }} placeOfSupply={quote.placeOfSupply} lines={totals.lines} heads={totals} />

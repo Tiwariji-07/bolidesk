@@ -4,7 +4,9 @@ import { makeShop } from "@/test/fixtures";
 import { AccessError } from "./access";
 import { createBlankInvoice, issueInvoice, saveInvoiceDraft } from "./billing";
 import { createCustomer } from "./customers";
-import { applyWebhookEvent, createPaymentRequest, recordPayment, recordRefund, reversePayment } from "./payments";
+import { createProviders } from "./integrations/providers";
+import { readEnvironment } from "./env";
+import { applyWebhookEvent, createPaymentRequest, recordPayment, recordRefund, retryStuckRequests, reversePayment } from "./payments";
 import { getPrisma } from "./prisma";
 
 const db = () => getPrisma();
@@ -105,8 +107,8 @@ describe("payments ledger (Postgres)", () => {
     expect((await applyWebhookEvent(razorpay, late, findRequest)).status).toBe(200);
     const payments = await db().payment.findMany({ where: { invoiceId: invoice.id } });
     expect(payments.reduce((sum, payment) => sum + payment.amountPaise, 0)).toBe(136000);
-    await expect(recordRefund(shop.office, { invoiceId: invoice.id, amount: "180", method: "CASH", reference: "", reason: "overpaid" })).rejects.toBeInstanceOf(AccessError);
-    await recordRefund(shop.owner, { invoiceId: invoice.id, amount: "180", method: "CASH", reference: "", reason: "overpaid" });
+    await expect(recordRefund(shop.office, { invoiceId: invoice.id, amount: "180", method: "CASH", reference: "", reason: "overpaid" , idempotencyKey: `r1-${invoice.id}` })).rejects.toBeInstanceOf(AccessError);
+    await recordRefund(shop.owner, { invoiceId: invoice.id, amount: "180", method: "CASH", reference: "", reason: "overpaid" , idempotencyKey: `r2-${invoice.id}` });
     expect(await status(invoice.id)).toBe("PAID");
   });
 
@@ -125,5 +127,46 @@ describe("payments ledger (Postgres)", () => {
     const { shop, invoice } = await issuedInvoice();
     await recordPayment(shop.office, { invoiceId: invoice.id, amount: "1180", method: "CASH", idempotencyKey: key() });
     await expect(createPaymentRequest(shop.office, invoice.id, new FakeRazorpay())).rejects.toThrow(/Nothing is due/);
+  });
+
+  it("retries closing a link that Razorpay could not cancel, even after the invoice is paid", async () => {
+    const { shop, invoice } = await issuedInvoice();
+    const razorpay = new FakeRazorpay();
+    await createPaymentRequest(shop.office, invoice.id, razorpay);
+    razorpay.failCancels = true;
+    await recordPayment(shop.technician, { invoiceId: invoice.id, amount: "1180", method: "CASH", idempotencyKey: key() }, razorpay);
+    expect(await db().paymentRequest.findFirst({ where: { invoiceId: invoice.id } })).toMatchObject({ status: "CANCELLING", lastError: expect.stringContaining("unavailable") });
+    razorpay.failCancels = false;
+    expect(await retryStuckRequests(shop.office, invoice.id, razorpay)).toBe(0);
+    expect([...razorpay.links.values()][0].status).toBe("cancelled");
+  });
+
+  it("closes stale demo links locally instead of leaving them stuck", async () => {
+    const { shop, invoice } = await issuedInvoice();
+    const demo = createProviders({ env: readEnvironment({ DEMO_MODE: "true" }) }).payments;
+    await createPaymentRequest(shop.office, invoice.id, demo);
+    await recordPayment(shop.technician, { invoiceId: invoice.id, amount: "100", method: "CASH", idempotencyKey: key() }, demo);
+    expect(await db().paymentRequest.findFirst({ where: { invoiceId: invoice.id } })).toMatchObject({ status: "CANCELLED" });
+    await expect(createPaymentRequest(shop.office, invoice.id, demo)).resolves.toMatchObject({ demo: true, url: null });
+  });
+
+  it("records a retried refund once", async () => {
+    const { shop, invoice } = await issuedInvoice();
+    await recordPayment(shop.office, { invoiceId: invoice.id, amount: "1180", method: "CASH", idempotencyKey: key() });
+    const razorpay = new FakeRazorpay();
+    await db().paymentRequest.create({ data: { workspaceId: shop.workspace.id, invoiceId: invoice.id, reference: `PRX${invoice.id}`, provider: "RAZORPAY", status: "PAID", amountPaise: 118000, providerPaymentLinkId: `plink_x_${invoice.id}` } });
+    await applyWebhookEvent(razorpay, { kind: "payment", linkId: `plink_x_${invoice.id}`, reference: null, linkStatus: "paid", payment: { id: `pay_x_${invoice.id}`, amount: 118000, currency: "INR", status: "captured" } }, findRequest);
+    const refund = { invoiceId: invoice.id, amount: "500", method: "CASH" as const, reference: "", reason: "overpaid", idempotencyKey: `refund-retry-${invoice.id}` };
+    await Promise.all([recordRefund(shop.owner, refund), recordRefund(shop.owner, refund)]);
+    expect(await db().payment.count({ where: { invoiceId: invoice.id, entryKind: "REFUND" } })).toBe(1);
+  });
+
+  it("holds a replayed webhook for a link closed by the ledger migration instead of counting it twice", async () => {
+    const { shop, invoice } = await issuedInvoice();
+    await db().paymentRequest.create({ data: { workspaceId: shop.workspace.id, invoiceId: invoice.id, reference: `PRL${invoice.id}`, provider: "RAZORPAY", status: "EXPIRED", amountPaise: 118000, providerPaymentLinkId: `plink_l_${invoice.id}`, lastError: "legacy: closed by the payments-ledger migration" } });
+    const response = await applyWebhookEvent(new FakeRazorpay(), { kind: "payment", linkId: `plink_l_${invoice.id}`, reference: null, linkStatus: "paid", payment: { id: `pay_l_${invoice.id}`, amount: 118000, currency: "INR", status: "captured" } }, findRequest);
+    expect(response.status).toBe(200);
+    expect(await db().payment.count({ where: { invoiceId: invoice.id } })).toBe(0);
+    expect(await db().activity.findFirst({ where: { workspaceId: shop.workspace.id, body: { contains: "before the payments ledger" } } })).not.toBeNull();
   });
 });

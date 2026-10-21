@@ -67,3 +67,8 @@ export function getJob(workspaceId: string, id: string) {
 export function listActivities(workspaceId: string, take = 20) {
   return getPrisma().activity.findMany({ where: { workspaceId }, include: { actor: { select: { name: true, email: true } } }, orderBy: { createdAt: "desc" }, take });
 }
+
+/** A link that should have been closed or confirmed over a minute ago: staff can retry it from the invoice. */
+export function stuckPaymentLink(invoiceId: string) {
+  return getPrisma().paymentRequest.findFirst({ where: { invoiceId, status: { in: ["CANCELLING", "PENDING"] }, updatedAt: { lt: new Date(Date.now() - 60_000) } }, select: { lastError: true } });
+}

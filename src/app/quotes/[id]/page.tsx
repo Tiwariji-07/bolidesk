@@ -7,9 +7,9 @@ import { LineEditor } from "@/components/line-editor";
 import { PrintButton } from "@/components/print-button";
 import { PageHeader, Status } from "@/components/ui";
 import { toIsoDate } from "@/domain/business-time";
-import { ALLOWED_RATES, calculateDocument, type GstScheme } from "@/domain/gst";
+import { ALLOWED_RATES, type GstScheme } from "@/domain/gst";
 import { can, currentAccess } from "@/server/access";
-import { frozenHeads, storedLines, workspaceMode } from "@/server/billing";
+import { quoteTotals, storedLines } from "@/server/billing";
 import { getQuote, getWorkspace } from "@/server/queries";
 
 export default async function QuotePage({ params }: { params: Promise<{ id: string }> }) {
@@ -19,7 +19,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
   if (!quote) notFound();
   const lines = storedLines(quote.linesJson);
   // Sent quotes show what was sent; only drafts follow the current settings.
-  const totals = frozenHeads(quote.linesJson) ?? calculateDocument(lines, workspaceMode(workspace, quote.placeOfSupply));
+  const totals = quoteTotals(quote, workspace);
   const actions = <div className="form-actions no-print">
     {quote.status === "SENT" && can(access, "quotes.decide") && <><ActionButton action={moveQuoteAction.bind(null, quote.id, "ACCEPTED")} label="Customer accepted" pendingLabel="Saving…" /><ActionButton variant="secondary" action={moveQuoteAction.bind(null, quote.id, "REJECTED")} label="Customer declined" confirmText="Mark this quote declined? It cannot be reopened." /></>}
     {quote.status !== "DRAFT" && quote.status !== "INVOICED" && can(access, "portal.share") && <ActionButton variant="secondary" action={sharePortalLinkAction.bind(null, { quoteId: quote.id })} label="Customer link" linkLabel="Private quote link, valid 30 days" whatsappText={`Quote ${quote.number} from ${workspace.brandName}:`} />}
