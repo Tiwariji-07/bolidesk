@@ -10,7 +10,7 @@ const stateLabel = (code?: string | null) => code ? `${STATES[code] ?? "Unknown"
 
 /** The paper invoice/quote: tax heads per line, seller and buyer as frozen at issue. Print-friendly. */
 export function DocumentView({ title, number, issued, due, seller, buyer, placeOfSupply, lines, heads, terms, footer, legacy }: {
-  title: string; number: string | null; issued: Date | null; due: Date | null;
+  title: string; number: string | null; issued: Date | null; due?: Date | null;
   seller: Party & { tradeName?: string; upiId?: string | null }; buyer: Party; placeOfSupply: string | null;
   lines: (DocumentLine | CalculatedLine)[]; heads: Heads; terms?: string | null; footer?: React.ReactNode; legacy?: boolean;
 }) {
@@ -24,7 +24,7 @@ export function DocumentView({ title, number, issued, due, seller, buyer, placeO
         <h2>{title}</h2>
         <p className="muted">{seller.name}{seller.address ? <><br />{seller.address}</> : null}{seller.stateCode ? <><br />State: {stateLabel(seller.stateCode)}</> : null}{seller.gstin ? <><br />GSTIN: {seller.gstin}</> : null}</p>
       </div>
-      <div className="invoice-meta"><strong>{number ?? "Draft"}</strong>{issued && <><br />Date {formatDay(issued)}</>}<br />Due {due ? formatDay(due) : "on receipt"}{placeOfSupply && <><br />Place of supply: {stateLabel(placeOfSupply)}</>}</div>
+      <div className="invoice-meta"><strong>{number ?? "Draft"}</strong>{issued && <><br />Date {formatDay(issued)}</>}{due !== undefined && <><br />Due {due ? formatDay(due) : "on receipt"}</>}{placeOfSupply && <><br />Place of supply: {stateLabel(placeOfSupply)}</>}</div>
     </div>
     {legacy && <p className="notice">Issued before BoliDesk kept invoice snapshots; seller and buyer details are reconstructed.</p>}
     <div className="split" style={{ margin: "18px 0" }}>

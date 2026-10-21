@@ -193,6 +193,7 @@ model Workspace {
   activities    Activity[]
   paymentRequests PaymentRequest[]
   payments      Payment[]
+  creditNotes   CreditNote[]
   deliveryLogs  DeliveryLog[]
   portalTokens  CustomerPortalToken[]
   createdAt     DateTime   @default(now())
@@ -290,6 +291,7 @@ model Invoice {
   sellerSnapshot Json?
   buyerSnapshot Json?
   paidAt      DateTime?
+  creditNote  CreditNote?
   payments    Payment[]
   paymentRequests PaymentRequest[]
   deliveryLogs DeliveryLog[]
@@ -297,6 +299,33 @@ model Invoice {
   createdAt   DateTime      @default(now())
   @@unique([workspaceId, number])
   @@index([workspaceId, status])
+}
+
+/**
+ * Cancels an issued invoice in full: its own Rule 46 series, the invoice's exact amounts and tax heads reversed,
+ * and the invoice's frozen seller/buyer details. Partial credit notes are not supported yet.
+ */
+model CreditNote {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invoiceId      String    @unique
+  invoice        Invoice   @relation(fields: [invoiceId], references: [id], onDelete: NoAction)
+  number         String
+  reason         String
+  linesJson      Json
+  subtotalPaise  Int
+  cgstPaise      Int
+  sgstPaise      Int
+  igstPaise      Int
+  taxPaise       Int
+  totalPaise     Int
+  issueDate      DateTime  @db.Date
+  issuedAt       DateTime  @default(now())
+  issuedByUserId String
+  createdAt      DateTime  @default(now())
+
+  @@unique([workspaceId, number])
 }
 
 /** Atomic per-workspace, per-kind, per-financial-year sequence. */

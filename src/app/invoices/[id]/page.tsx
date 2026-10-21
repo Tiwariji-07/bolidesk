@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createPaymentRequestAction, sharePortalLinkAction } from "@/app/actions";
 import { ActionButton } from "@/components/action-button";
+import { CreditNoteButton } from "@/components/credit-note-button";
 import { buyerFromSnapshot, DocumentView, sellerFromSnapshot } from "@/components/document-view";
 import { LineEditor } from "@/components/line-editor";
 import { RecordPaymentForm, RefundForm, ReverseReceiptButton } from "@/components/payment-panel";
@@ -39,7 +40,8 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const buyer = buyerFromSnapshot(invoice.buyerSnapshot as BuyerSnapshot | null, invoice.customer);
   const legacy = Boolean((invoice.sellerSnapshot as SellerSnapshot | null)?.legacy);
   const open = invoice.balance.due > 0 && invoice.status === "SENT";
-  return <><PageHeader eyebrow={`Invoice for ${invoice.customer.name}`} title={invoice.number ?? "Invoice"} action={<div className="form-actions no-print"><PrintButton /><Status value={invoice.displayStatus} /></div>} />
+  return <><PageHeader eyebrow={`Invoice for ${invoice.customer.name}`} title={invoice.number ?? "Invoice"} action={<div className="form-actions no-print"><PrintButton />{!invoice.creditNote && can(access, "credit.issue") && <CreditNoteButton invoiceId={invoice.id} version={invoice.version} number={invoice.number ?? ""} />}<Status value={invoice.displayStatus} /></div>} />
+    {invoice.creditNote && <p className="notice no-print">Cancelled by credit note <Link className="text-link-ink" href={`/invoices/${invoice.id}/credit-note`}>{invoice.creditNote.number}</Link>: {invoice.creditNote.reason}{invoice.balance.refundDue ? `. ${formatINR(invoice.balance.refundDue)} received on it is due back to the customer.` : ""}</p>}
     {open && <section className="panel no-print"><div className="panel-title"><h2>{formatINR(invoice.balance.due)} to collect</h2><span>{invoice.paymentRequests[0] ? `Payment link ${invoice.paymentRequests[0].status.toLowerCase()}` : "Share a link or record what you received"}</span></div><div className="form-actions">
       {can(access, "payments.request") && <ActionButton action={createPaymentRequestAction.bind(null, invoice.id)} label={isDemoMode() ? "Payment link (demo)" : "Payment link"} pendingLabel="Preparing…" linkLabel={isDemoMode() ? "Demo: the customer sees the invoice; no money is collected." : "Send this to the customer: invoice with a Razorpay pay button"} whatsappText={`Invoice ${invoice.number} from ${workspace.brandName}, ${formatINR(invoice.balance.due)} due:`} />}
       {can(access, "portal.share") && <ActionButton variant="secondary" action={sharePortalLinkAction.bind(null, { invoiceId: invoice.id })} label="Invoice link only" pendingLabel="Preparing…" linkLabel="Private invoice link, valid 30 days" whatsappText={`Invoice ${invoice.number} from ${workspace.brandName}:`} />}

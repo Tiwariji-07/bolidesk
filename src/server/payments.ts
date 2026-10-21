@@ -15,9 +15,10 @@ import { logActivity, withStaffLock, withSystemLock, type Actor, type Tx } from 
 
 const LIVE = ["PENDING", "ACTIVE", "CANCELLING"] as const;
 
-/** Credit notes reduce what is owed; none exist yet. */
-export async function creditedPaise(_tx: Tx, _invoiceId: string) {
-  return 0;
+/** Credit notes reduce what is owed. */
+export async function creditedPaise(tx: Tx, invoiceId: string) {
+  const result = await tx.creditNote.aggregate({ where: { invoiceId }, _sum: { totalPaise: true } });
+  return result._sum.totalPaise ?? 0;
 }
 
 async function balanceInTx(tx: Tx, invoiceId: string, totalPaise: number): Promise<Balance> {

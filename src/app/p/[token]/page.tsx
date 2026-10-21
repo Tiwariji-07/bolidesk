@@ -18,14 +18,15 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
   const workspace = await getWorkspace(portal.workspaceId);
   const { invoice, quote } = portal;
   if (invoice && invoice.status !== "DRAFT") {
-    const [payments, request] = await Promise.all([
+    const [payments, request, creditNote] = await Promise.all([
       getPrisma().payment.findMany({ where: { invoiceId: invoice.id }, select: { amountPaise: true } }),
       getPrisma().paymentRequest.findFirst({ where: { invoiceId: invoice.id, status: "ACTIVE", expiresAt: { gt: new Date() } }, select: { url: true } }),
+      getPrisma().creditNote.findUnique({ where: { invoiceId: invoice.id }, select: { totalPaise: true, number: true } }),
     ]);
-    const balance = invoiceBalance({ ...invoice, payments });
+    const balance = invoiceBalance({ ...invoice, payments, creditNote });
     const seller = sellerFromSnapshot(invoice.sellerSnapshot as SellerSnapshot | null, { name: workspace.legalName ?? workspace.name, brandName: workspace.brandName });
     return <main id="main-content" className="portal-page"><section className="portal-wide">
-      <p className="eyebrow">{workspace.brandName}</p><h1>{balance.due === 0 ? "Paid, thank you" : `${formatINR(balance.due)} due`}</h1>
+      <p className="eyebrow">{workspace.brandName}</p><h1>{creditNote ? `Cancelled by credit note ${creditNote.number}` : balance.due === 0 ? "Paid, thank you" : `${formatINR(balance.due)} due`}</h1>
       <p>Hello {portal.customer.name}. {balance.due === 0 ? "We have received your payment." : invoice.dueDate ? `Please pay by ${formatDay(invoice.dueDate)}.` : ""}</p>
       {balance.due > 0 && request?.url && <p><a className="button-link" href={request.url} rel="noreferrer">Pay {formatINR(balance.due)} by UPI, card or net banking</a></p>}
       {balance.due > 0 && request && !request.url && <p className="notice">Demo payment link: no money is collected in demo mode.</p>}

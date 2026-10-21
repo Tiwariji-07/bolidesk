@@ -6,6 +6,7 @@ import { requireAccess } from "@/server/access";
 import { assignJobCustomer, convertQuote, createBlankInvoice, createBlankQuote, createQuoteFromJob, issueInvoice, moveQuote, saveInvoiceDraft, saveJob, saveQuoteDraft, type DraftInput } from "@/server/billing";
 import { createCustomer, updateCustomer, updateSettings, type CustomerInput, type SettingsInput } from "@/server/customers";
 import { attempt, UserError } from "@/server/errors";
+import { issueCreditNote } from "@/server/credit-notes";
 import { completeFollowUp, createFollowUp, snoozeFollowUp } from "@/server/followups";
 import { createProviders } from "@/server/integrations/providers";
 import { createPaymentRequest, recordPayment, recordRefund, reversePayment } from "@/server/payments";
@@ -145,6 +146,14 @@ export async function recordRefundAction(values: { invoiceId: string; amount: st
     const method = z.enum(["CASH", "UPI", "CARD", "BANK"]).parse(values.method);
     await recordRefund(await requireAccess("payments.correct"), { ...values, method });
     refresh("/invoices", `/invoices/${values.invoiceId}`, "/", "/reports");
+  });
+}
+
+export async function issueCreditNoteAction(invoiceId: string, version: number, reason: string) {
+  return attempt(async () => {
+    const result = await issueCreditNote(await requireAccess("credit.issue"), { invoiceId: id(invoiceId, "Invoice"), version, reason: String(reason ?? "") }, createProviders().payments);
+    refresh("/invoices", `/invoices/${invoiceId}`, "/", "/reports");
+    return result;
   });
 }
 

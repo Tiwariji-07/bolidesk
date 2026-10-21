@@ -18,7 +18,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
   if (!customer) notFound();
   const [quotes, invoices] = await Promise.all([
     getPrisma().quote.findMany({ where: { workspaceId: access.workspaceId, customerId: id }, orderBy: { createdAt: "desc" }, take: 20 }),
-    getPrisma().invoice.findMany({ where: { workspaceId: access.workspaceId, customerId: id }, include: { payments: { select: { amountPaise: true } } }, orderBy: { createdAt: "desc" }, take: 20 }).then((rows) => rows.map(withBalance)),
+    getPrisma().invoice.findMany({ where: { workspaceId: access.workspaceId, customerId: id }, include: { payments: { select: { amountPaise: true } }, creditNote: { select: { totalPaise: true } } }, orderBy: { createdAt: "desc" }, take: 20 }).then((rows) => rows.map(withBalance)),
   ]);
   const due = (await listInvoices(access.workspaceId)).filter((invoice) => invoice.customerId === id).reduce((sum, invoice) => sum + invoice.balance.due, 0);
   return <><PageHeader eyebrow="Customer" title={customer.name} action={<div className="form-actions">
