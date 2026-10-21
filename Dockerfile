@@ -22,4 +22,6 @@ RUN apk add --no-cache tzdata
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s CMD wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1
+USER node
 CMD ["node", "server.js"]

@@ -64,3 +64,8 @@ a.card-row:hover strong { text-decoration: underline; }
 .job-controls select, .job-controls input { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; min-height: 36px; padding: 6px 8px; }
 nav .text-link-ink[aria-current="page"] { text-decoration: none; color: var(--ink); }
 @media (min-width: 720px) { .job-card { grid-template-columns: 1fr auto; align-items: start; } }
+.page-header .form-actions { align-items: center; }
+.page-header .status { align-self: center; }
+.mobile-nav .logout { color: var(--green-dark); font-size: 14px; }
+.doc-table { min-width: 0; }
+@media (max-width: 719px) { .doc-table th, .doc-table td { font-size: 13px; padding: 8px 4px; white-space: normal; } }
