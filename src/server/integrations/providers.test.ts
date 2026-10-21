@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { createHmac } from "node:crypto";
 import { OpenAiStructuredJobParser } from "./openai";
+import { readEnvironment } from "../env";
 import { createProviders } from "./providers";
 import { RazorpayProvider, verifyRazorpaySignature } from "./razorpay";
 import { WhatsAppCloudProvider } from "./whatsapp";
 
 describe("credential-ready providers", () => {
   it("uses local-safe providers without credentials", () => {
-    const providers = createProviders({ env: { DEMO_MODE: true, OPENAI_MODEL: "gpt-4.1-mini", WHATSAPP_API_VERSION: "v22.0" } });
+    const providers = createProviders({ env: readEnvironment({ DEMO_MODE: "true" }) });
     expect([providers.jobParser.name, providers.messaging.name, providers.payments.name]).toEqual(["local-demo", "demo", "demo"]);
+  });
+
+  it("refuses to fall back to demo adapters in live mode", () => {
+    expect(() => createProviders({ env: readEnvironment({ DEMO_MODE: "false", OPENAI_API_KEY: "key" }) })).toThrow("WHATSAPP_ACCESS_TOKEN is required");
   });
 
   it("parses OpenAI structured output through an injected fetcher", async () => {

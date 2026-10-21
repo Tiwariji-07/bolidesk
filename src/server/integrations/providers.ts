@@ -25,15 +25,19 @@ class DemoPaymentProvider implements PaymentProvider {
 
 export type Providers = { jobParser: JobParserProvider; messaging: MessagingProvider; payments: PaymentProvider };
 
-/** Chooses live adapters only when every required credential is intentionally present. */
+function required(value: string | undefined, variable: string) {
+  if (!value) throw new Error(`${variable} is required when DEMO_MODE=false.`);
+  return value;
+}
+
+/** Demo adapters in demo mode; otherwise live adapters, and a missing credential is an error, never a silent demo fallback. */
 export function createProviders(options: { env?: AppEnvironment; fetcher?: Fetcher } = {}): Providers {
   const env = options.env ?? readEnvironment();
   const fetcher = options.fetcher ?? fetch;
-  const demo = { jobParser: new DemoJobParser(), messaging: new DemoMessagingProvider(), payments: new DemoPaymentProvider() };
-  if (env.DEMO_MODE) return demo;
+  if (env.DEMO_MODE) return { jobParser: new DemoJobParser(), messaging: new DemoMessagingProvider(), payments: new DemoPaymentProvider() };
   return {
-    jobParser: env.AI_PROVIDER === "openai" && env.OPENAI_API_KEY ? new OpenAiStructuredJobParser(env.OPENAI_API_KEY, env.OPENAI_MODEL, fetcher) : demo.jobParser,
-    messaging: env.WHATSAPP_ACCESS_TOKEN && env.WHATSAPP_PHONE_NUMBER_ID ? new WhatsAppCloudProvider(env.WHATSAPP_ACCESS_TOKEN, env.WHATSAPP_PHONE_NUMBER_ID, env.WHATSAPP_API_VERSION, fetcher) : demo.messaging,
-    payments: env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET && env.RAZORPAY_WEBHOOK_SECRET ? new RazorpayProvider(env.RAZORPAY_KEY_ID, env.RAZORPAY_KEY_SECRET, env.RAZORPAY_WEBHOOK_SECRET, fetcher) : demo.payments,
+    jobParser: new OpenAiStructuredJobParser(required(env.OPENAI_API_KEY, "OPENAI_API_KEY"), env.OPENAI_MODEL, fetcher),
+    messaging: new WhatsAppCloudProvider(required(env.WHATSAPP_ACCESS_TOKEN, "WHATSAPP_ACCESS_TOKEN"), required(env.WHATSAPP_PHONE_NUMBER_ID, "WHATSAPP_PHONE_NUMBER_ID"), env.WHATSAPP_API_VERSION, fetcher),
+    payments: new RazorpayProvider(required(env.RAZORPAY_KEY_ID, "RAZORPAY_KEY_ID"), required(env.RAZORPAY_KEY_SECRET, "RAZORPAY_KEY_SECRET"), required(env.RAZORPAY_WEBHOOK_SECRET, "RAZORPAY_WEBHOOK_SECRET"), fetcher),
   };
 }

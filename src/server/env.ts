@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+type EnvironmentSource = Record<string, string | undefined>;
+
 const boolean = z.enum(["true", "false"]).optional().transform((value) => value !== "false");
 const optional = z.preprocess((value) => typeof value === "string" && !value.trim() ? undefined : value, z.string().trim().min(1).optional());
 const optionalUrl = z.preprocess((value) => typeof value === "string" && !value.trim() ? undefined : value, z.string().url().optional());
@@ -18,25 +20,34 @@ const environmentSchema = z.object({
   RAZORPAY_KEY_ID: optional,
   RAZORPAY_KEY_SECRET: optional,
   RAZORPAY_WEBHOOK_SECRET: optional,
+  ALLOW_REGISTRATION: z.enum(["true", "false"]).optional().transform((value) => value === "true"),
+  CRON_SECRET: optional,
 });
 
 export type AppEnvironment = z.infer<typeof environmentSchema>;
 export type EnvironmentIssue = { variable: string; message: string };
 
-export function readEnvironment(source: NodeJS.ProcessEnv = process.env): AppEnvironment {
+export function readEnvironment(source: EnvironmentSource = process.env): AppEnvironment {
   return environmentSchema.parse(source);
 }
 
-/** Reports production credentials without ever printing their values. */
-export function validateEnvironment(source: NodeJS.ProcessEnv = process.env): EnvironmentIssue[] {
-  const parsed = environmentSchema.safeParse(source);
-  if (!parsed.success) return parsed.error.issues.map((issue) => ({ variable: issue.path.join("."), message: issue.message }));
-  if (parsed.data.DEMO_MODE) return [];
+/** Reports missing or weak configuration without ever printing values. */
+export function validateEnvironment(source: EnvironmentSource = process.env): EnvironmentIssue[] {
   const issues: EnvironmentIssue[] = [];
-  const required: Array<keyof AppEnvironment> = ["APP_URL", "OPENAI_API_KEY", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET"];
+  if (!source.DATABASE_URL?.trim()) issues.push({ variable: "DATABASE_URL", message: "Required." });
+  if (!source.SESSION_SECRET || source.SESSION_SECRET.length < 32) issues.push({ variable: "SESSION_SECRET", message: "Required, at least 32 characters." });
+  const parsed = environmentSchema.safeParse(source);
+  if (!parsed.success) return [...issues, ...parsed.error.issues.map((issue) => ({ variable: issue.path.join("."), message: issue.message }))];
+  if (parsed.data.DEMO_MODE) return issues;
+  const required: Array<keyof AppEnvironment> = ["APP_URL", "OPENAI_API_KEY", "WHATSAPP_ACCESS_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET", "CRON_SECRET"];
   for (const variable of required) if (!parsed.data[variable]) issues.push({ variable, message: "Required when DEMO_MODE=false." });
   if (parsed.data.AI_PROVIDER !== "openai") issues.push({ variable: "AI_PROVIDER", message: "Set to openai when DEMO_MODE=false." });
+  if (parsed.data.APP_URL && !parsed.data.APP_URL.startsWith("https://")) issues.push({ variable: "APP_URL", message: "Must be an https:// origin when DEMO_MODE=false." });
   return issues;
+}
+
+export function isDemoMode(env = readEnvironment()) {
+  return env.DEMO_MODE;
 }
 
 export function publicAppUrl(env = readEnvironment()): string {
