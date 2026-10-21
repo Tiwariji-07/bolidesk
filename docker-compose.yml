@@ -1,3 +1,5 @@
+# Local stack. Secrets come from your shell or .env next to this file:
+#   SESSION_SECRET (32+ chars) and DEMO_USER_PASSWORD (12+ chars) are required.
 services:
   db:
     image: postgres:16-alpine
@@ -7,7 +9,7 @@ services:
       POSTGRES_USER: bolidesk
       POSTGRES_PASSWORD: bolidesk
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -23,6 +25,8 @@ services:
     command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts"
     environment:
       DATABASE_URL: postgresql://bolidesk:bolidesk@db:5432/bolidesk?schema=public
+      DEMO_USER_EMAIL: ${DEMO_USER_EMAIL:-demo@bolidesk.local}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:?Set DEMO_USER_PASSWORD (12+ characters)}
     depends_on:
       db:
         condition: service_healthy
@@ -30,9 +34,10 @@ services:
   app:
     build: .
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       DATABASE_URL: postgresql://bolidesk:bolidesk@db:5432/bolidesk?schema=public
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET (32+ characters)}
       DEMO_MODE: "true"
       APP_URL: http://localhost:3000
     depends_on:
