@@ -20,5 +20,6 @@ describe("normalizePhone", () => {
   it("formats for people and for WhatsApp", () => {
     expect(formatPhone("+919876543210")).toBe("+91 98765 43210");
     expect(whatsappRecipient("+919876543210")).toBe("919876543210");
+    expect(whatsappRecipient("98765 43210")).toBe("919876543210");
   });
 });

@@ -11,9 +11,9 @@ export function normalizePhone(input: string): string | null {
   return /^[6-9]\d{9}$/.test(national) ? `+91${national}` : null;
 }
 
-/** WhatsApp Cloud API wants the number without "+". */
+/** WhatsApp Cloud API wants the number without "+". Older records not yet in the +91 form are normalized first. */
 export function whatsappRecipient(phone: string) {
-  return phone.replace(/\D/g, "");
+  return (normalizePhone(phone) ?? phone).replace(/\D/g, "");
 }
 
 export function formatPhone(phone: string) {
