@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { PageHeader, Status } from "@/components/ui";
 import { formatINR } from "@/lib/format";
-import { currentWorkspaceId } from "@/server/current-workspace";
+import { currentAccess } from "@/server/access";
 import { forWorkspace } from "@/server/persistence";
 
 function service(lines: unknown) {
@@ -10,7 +10,7 @@ function service(lines: unknown) {
 }
 
 export default async function Dashboard() {
-  const workspace = forWorkspace(await currentWorkspaceId());
+  const workspace = forWorkspace((await currentAccess()).workspaceId);
   const [invoices, quotes, activities] = await Promise.all([workspace.invoices.list(), workspace.quotes.list(), workspace.activities.list()]);
   const openInvoices = invoices.filter((invoice) => invoice.status !== "PAID");
   const due = openInvoices.reduce((sum, invoice) => sum + invoice.total, 0);

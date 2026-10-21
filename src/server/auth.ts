@@ -1,74 +1,71 @@
 import bcrypt from "bcrypt";
-import { createHmac, timingSafeEqual } from "node:crypto";
 
-export type SessionPayload = { userId: string; issuedAt: number; expiresAt: number };
-export type MembershipRole = "OWNER" | "ADMIN" | "MEMBER";
-type Membership = { userId: string; workspaceId: string; role: MembershipRole };
+/** bcrypt only reads the first 72 bytes; longer passwords would silently share a hash. */
+export const MAX_PASSWORD_BYTES = 72;
+const DUMMY_HASH = "$2b$12$rDebLnPobaXHRss1X.bffeEMKUE0lJ9i4TVv9RIjsyNt1.bgfcTp6";
 
-function encode(value: string) {
-  return Buffer.from(value).toString("base64url");
-}
-
-function sign(payload: string, secret: string) {
-  return createHmac("sha256", secret).update(payload).digest("base64url");
-}
-
-export function createSessionToken(session: SessionPayload, secret: string) {
-  const payload = encode(JSON.stringify(session));
-  return `${payload}.${sign(payload, secret)}`;
-}
-
-export function readSessionToken(token: string | undefined, secret: string, now = Math.floor(Date.now() / 1000)): SessionPayload | null {
-  if (!token) return null;
-  const [payload, signature, ...rest] = token.split(".");
-  if (!payload || !signature || rest.length) return null;
-  const expected = sign(payload, secret);
-  if (signature.length !== expected.length || !timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
-  try {
-    const parsed = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as SessionPayload;
-    if (typeof parsed.userId !== "string" || !Number.isInteger(parsed.issuedAt) || !Number.isInteger(parsed.expiresAt) || parsed.expiresAt <= now) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
+export function passwordProblem(password: string): string | null {
+  if (password.length < 12) return "Use a password of at least 12 characters.";
+  if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) return "Use a password of at most 72 bytes.";
+  return null;
 }
 
 export async function hashPassword(password: string) {
+  const problem = passwordProblem(password);
+  if (problem) throw new Error(problem);
   return bcrypt.hash(password, 12);
 }
+
+export const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 type AuthenticationDatabase = {
   user: { findUnique: (input: { where: { email: string } }) => Promise<{ id: string; email: string; passwordHash: string } | null> };
 };
 
+/** Compares against a dummy hash for unknown emails so response time does not reveal which emails exist. */
 export async function authenticateUser(db: AuthenticationDatabase, email: string, password: string) {
-  const user = await db.user.findUnique({ where: { email: email.trim().toLowerCase() } });
-  if (!user || !(await bcrypt.compare(password, user.passwordHash))) return null;
-  return { id: user.id, email: user.email };
+  if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) return null;
+  const user = await db.user.findUnique({ where: { email: normalizeEmail(email) } });
+  const matches = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
+  return user && matches ? { id: user.id, email: user.email } : null;
 }
 
 type RegistrationDatabase = {
   $transaction: <T>(callback: (tx: {
-    user: { create: (input: { data: { email: string; passwordHash: string } }) => Promise<{ id: string; email: string }> };
+    user: { create: (input: { data: { email: string; name?: string; passwordHash: string } }) => Promise<{ id: string; email: string }> };
     workspace: { create: (input: { data: { name: string; brandName: string } }) => Promise<{ id: string }> };
-    membership: { create: (input: { data: { userId: string; workspaceId: string; role: "OWNER" } }) => Promise<unknown> };
+    membership: { create: (input: { data: { userId: string; workspaceId: string; role: "OWNER" } }) => Promise<{ id: string }> };
   }) => Promise<T>) => Promise<T>;
 };
 
-export async function registerWorkspaceOwner(db: RegistrationDatabase, input: { email: string; password: string; workspaceName: string }) {
-  const email = input.email.trim().toLowerCase();
+export async function registerWorkspaceOwner(db: RegistrationDatabase, input: { email: string; name?: string; password: string; workspaceName: string }) {
+  const email = normalizeEmail(input.email);
   const workspaceName = input.workspaceName.trim();
   const passwordHash = await hashPassword(input.password);
   return db.$transaction(async (tx) => {
-    const user = await tx.user.create({ data: { email, passwordHash } });
+    const user = await tx.user.create({ data: { email, name: input.name?.trim() || undefined, passwordHash } });
     const workspace = await tx.workspace.create({ data: { name: workspaceName, brandName: workspaceName } });
-    await tx.membership.create({ data: { userId: user.id, workspaceId: workspace.id, role: "OWNER" } });
-    return { userId: user.id, workspaceId: workspace.id };
+    const membership = await tx.membership.create({ data: { userId: user.id, workspaceId: workspace.id, role: "OWNER" } });
+    return { userId: user.id, workspaceId: workspace.id, membershipId: membership.id };
   });
 }
 
-/** Ignores untrusted client workspace input; the authenticated user's first membership is authoritative. */
-export function resolveWorkspaceForUser(memberships: Membership[], userId: string, _untrustedWorkspaceId?: string) {
-  const membership = memberships.find((item) => item.userId === userId);
-  return membership ? { workspaceId: membership.workspaceId, role: membership.role } : null;
-}
+const failures = new Map<string, { count: number; resetAt: number }>();
+const WINDOW_MS = 15 * 60 * 1000;
+const MAX_FAILURES = 8;
+
+/** Per-process throttle on failed sign-ins for one email. Enough for a single-server shop deployment. */
+export const loginThrottle = {
+  blocked(key: string, now = Date.now()) {
+    const entry = failures.get(key);
+    return Boolean(entry && entry.resetAt > now && entry.count >= MAX_FAILURES);
+  },
+  fail(key: string, now = Date.now()) {
+    const entry = failures.get(key);
+    if (!entry || entry.resetAt <= now) failures.set(key, { count: 1, resetAt: now + WINDOW_MS });
+    else entry.count += 1;
+  },
+  clear(key: string) {
+    failures.delete(key);
+  },
+};

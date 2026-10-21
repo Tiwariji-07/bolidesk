@@ -47,12 +47,15 @@ enum MembershipRole {
 }
 
 model User {
-  id           String       @id @default(cuid())
-  email        String       @unique
-  passwordHash String
-  memberships  Membership[]
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  id             String            @id @default(cuid())
+  email          String            @unique
+  name           String?
+  passwordHash   String
+  memberships    Membership[]
+  invitesCreated WorkspaceInvite[] @relation("InvitesCreated")
+  activities     Activity[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
 }
 
 model Membership {
@@ -62,11 +65,44 @@ model Membership {
   role        MembershipRole @default(MEMBER)
   user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sessions    Session[]
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   @@unique([userId, workspaceId])
   @@index([workspaceId, role])
+}
+
+/** Opaque server-side session: logout, removal and role changes revoke it. Only the token hash is stored. */
+model Session {
+  id           String     @id @default(cuid())
+  tokenHash    String     @unique
+  membershipId String
+  membership   Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  lastSeenAt   DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+
+  @@index([membershipId, expiresAt])
+}
+
+/** Owner-issued invite link. Only the token hash is stored; OWNER cannot be invited. */
+model WorkspaceInvite {
+  id              String         @id @default(cuid())
+  workspaceId     String
+  workspace       Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  email           String
+  role            MembershipRole
+  tokenHash       String         @unique
+  expiresAt       DateTime
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  createdByUserId String
+  createdBy       User           @relation("InvitesCreated", fields: [createdByUserId], references: [id])
+  createdAt       DateTime       @default(now())
+
+  @@unique([workspaceId, email])
 }
 
 model Workspace {
@@ -76,6 +112,7 @@ model Workspace {
   invoicePrefix String     @default("BD")
   gstin         String?
   memberships   Membership[]
+  invites       WorkspaceInvite[]
   customers     Customer[]
   jobs          Job[]
   quotes        Quote[]
@@ -183,6 +220,9 @@ model Activity {
   id          String    @id @default(cuid())
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /** Null for webhooks and automatic work. */
+  actorUserId String?
+  actor       User?     @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
   body        String
   createdAt   DateTime  @default(now())
   @@index([workspaceId, createdAt])

@@ -1,11 +1,11 @@
 import { CustomerForm } from "@/components/customer-form";
 import { EmptyState, PageHeader } from "@/components/ui";
 import { formatINR } from "@/lib/format";
-import { currentWorkspaceId } from "@/server/current-workspace";
+import { currentAccess } from "@/server/access";
 import { forWorkspace } from "@/server/persistence";
 
 export default async function CustomersPage() {
-  const workspace = forWorkspace(await currentWorkspaceId());
+  const workspace = forWorkspace((await currentAccess()).workspaceId);
   const [customers, invoices] = await Promise.all([workspace.customers.list(), workspace.invoices.list()]);
   const outstanding = new Map<string, number>();
   for (const invoice of invoices.filter((invoice) => invoice.status !== "PAID")) outstanding.set(invoice.customerId, (outstanding.get(invoice.customerId) ?? 0) + invoice.total);

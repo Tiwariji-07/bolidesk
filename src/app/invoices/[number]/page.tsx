@@ -2,13 +2,13 @@ import { notFound } from "next/navigation";
 import { InvoiceActions } from "@/components/invoice-actions";
 import { PageHeader, Status } from "@/components/ui";
 import { formatDate, formatINR } from "@/lib/format";
-import { currentWorkspaceId } from "@/server/current-workspace";
+import { currentAccess } from "@/server/access";
 import { forWorkspace } from "@/server/persistence";
 
 type Line = { description: string; quantity: number; unitPrice: number; taxRate: number };
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ number: string }> }) {
   const { number } = await params;
-  const workspace = forWorkspace(await currentWorkspaceId());
+  const workspace = forWorkspace((await currentAccess()).workspaceId);
   const [invoice, settings] = await Promise.all([workspace.invoices.getByNumber(number), workspace.workspace.get()]);
   if (!invoice || !settings) notFound();
   const lines = invoice.linesJson as unknown as Line[];
