@@ -18,7 +18,7 @@ export class RazorpayProvider implements PaymentProvider {
 
   async createPaymentLink(input: PaymentLinkInput): Promise<PaymentLinkResult> {
     const auth = Buffer.from(`${this.keyId}:${this.keySecret}`).toString("base64");
-    const response = await this.fetcher("https://api.razorpay.com/v1/payment_links", { method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" }, body: JSON.stringify({ amount: input.amount * 100, currency: "INR", reference_id: input.reference, description: input.description, customer: { name: input.customerName, contact: input.customerPhone.replace(/\D/g, "") }, callback_url: input.callbackUrl, callback_method: "get", notify: { sms: false, email: false }, reminder_enable: true }) });
+    const response = await this.fetcher("https://api.razorpay.com/v1/payment_links", { method: "POST", headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" }, body: JSON.stringify({ amount: input.amount, currency: "INR", reference_id: input.reference, description: input.description, customer: { name: input.customerName, contact: input.customerPhone.replace(/\D/g, "") }, callback_url: input.callbackUrl, callback_method: "get", notify: { sms: false, email: false }, reminder_enable: true }) });
     const body: unknown = await response.json().catch(() => null);
     if (!response.ok) throw new Error(`Razorpay payment link failed (${response.status}).`);
     const data = z.object({ id: z.string(), short_url: z.string().url() }).parse(body);

@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { ZodError } from "zod";
 import { AccessError } from "./access";
 
 /** An error whose message is written for shop staff and safe to show. */
@@ -13,6 +14,7 @@ export class ConflictError extends UserError {
 
 export function userMessage(error: unknown, fallback = "Could not save your changes. Try again."): string {
   if (error instanceof UserError || error instanceof AccessError) return error.message;
+  if (error instanceof ZodError) return error.issues[0]?.message ?? "Check the form and try again.";
   if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return "That already exists in this workspace.";
   console.error(error);
   return fallback;

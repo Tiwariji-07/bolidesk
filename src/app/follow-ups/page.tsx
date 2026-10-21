@@ -1,12 +1,19 @@
-import { FollowUpActions } from "@/components/follow-up-actions";
+import { FollowUpActions, NewFollowUpForm } from "@/components/follow-up-actions";
 import { EmptyState, PageHeader, Status } from "@/components/ui";
-import { formatDate } from "@/lib/format";
-import { currentAccess } from "@/server/access";
-import { forWorkspace } from "@/server/persistence";
+import { businessDate } from "@/domain/business-time";
+import { formatDate, formatTime } from "@/lib/format";
+import { can, currentAccess } from "@/server/access";
+import { getPrisma } from "@/server/prisma";
 
 export default async function FollowUpsPage() {
-  const workspace = forWorkspace((await currentAccess()).workspaceId);
-  const [followUps, activities] = await Promise.all([workspace.followUps.list(), workspace.activities.list()]);
-  const open = followUps.filter((followUp) => followUp.status === "OPEN");
-  return <><PageHeader eyebrow="One sensible next step" title="Follow-up queue" /><section className="panel"><div className="panel-title"><h2>{open.length} open follow-ups</h2><span>Due date first</span></div>{followUps.length ? followUps.map((followUp) => <div className="follow-card" key={followUp.id}><div><div className="form-actions"><Status value={followUp.status === "OPEN" && followUp.dueAt < new Date() ? "OVERDUE" : followUp.status} /><span className="muted">Due {formatDate(followUp.dueAt)}</span></div><h3>{followUp.subject}</h3><p>{followUp.action}</p></div>{followUp.status !== "DONE" && <FollowUpActions id={followUp.id} />}</div>) : <EmptyState title="Nothing to follow up" href="/jobs" action="Capture a job">Your reminders will appear here when you create them.</EmptyState>}</section><section className="panel"><div className="panel-title"><h2>Activity timeline</h2></div>{activities.length ? <ol className="timeline">{activities.slice(0, 8).map((activity) => <li key={activity.id}><time>{formatDate(activity.createdAt)}</time><span>{activity.body}</span></li>)}</ol> : <p className="muted">Completed reminders and status changes are recorded here.</p>}</section></>;
+  const access = await currentAccess();
+  const now = new Date();
+  const followUps = await getPrisma().followUp.findMany({ where: { workspaceId: access.workspaceId, OR: [{ status: { not: "DONE" } }, { createdAt: { gt: new Date(now.getTime() - 14 * 86_400_000) } }] }, orderBy: [{ status: "asc" }, { dueAt: "asc" }], take: 100 });
+  // A snoozed follow-up is due again once its time arrives.
+  const due = followUps.filter((followUp) => followUp.status !== "DONE" && followUp.dueAt <= now);
+  return <><PageHeader eyebrow="One sensible next step" title="Follow-ups" action={can(access, "followups.write") ? <NewFollowUpForm today={businessDate(now)} /> : undefined} />
+    <section className="panel"><div className="panel-title"><h2>{due.length} due now</h2><span>Earliest first</span></div>
+      {followUps.length ? followUps.map((followUp) => <div className="follow-card" key={followUp.id}><div><div className="form-actions"><Status value={followUp.status !== "DONE" && followUp.dueAt <= now ? "OVERDUE" : followUp.status} /><span className="muted">{formatDate(followUp.dueAt)}, {formatTime(followUp.dueAt)}</span></div><h3>{followUp.subject}</h3><p>{followUp.action}</p></div>{followUp.status !== "DONE" && can(access, "followups.write") && <FollowUpActions id={followUp.id} />}</div>)
+        : <EmptyState title="Nothing to follow up">Overdue invoices and reminders you add appear here.</EmptyState>}
+    </section></>;
 }

@@ -1,50 +1,79 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createQuoteFromJob, parseAndSaveJob } from "@/app/actions";
+import { assignJobCustomerAction, createQuoteFromJobAction, saveJobAction } from "@/app/actions";
+import type { ParsedJobNote } from "@/domain/job-note";
 import { formatINR } from "@/lib/format";
+import { CustomerForm } from "./customer-form";
 
 type Customer = { id: string; name: string };
-type Parsed = { customerName?: string; dueDate?: string; paymentTerms?: string; lines: { description: string; quantity: number; unitPrice: number; taxRate: number }[] };
 
-export function JobCaptureForm({ customers }: { customers: Customer[] }) {
+export function JobCaptureForm({ customers: initialCustomers, parserName, canQuote, defaultState }: { customers: Customer[]; parserName: string; canQuote: boolean; defaultState: string | null }) {
   const router = useRouter();
-  const [note, setNote] = useState("Ravi Sharma, 2 AC services at 650 each, GST 18%, due 30 July 2026");
+  const [customers, setCustomers] = useState(initialCustomers);
+  const [note, setNote] = useState("");
   const [customerId, setCustomerId] = useState("");
-  const [parsed, setParsed] = useState<Parsed | null>(null);
-  const [jobId, setJobId] = useState("");
-  const [message, setMessage] = useState("");
+  const [saved, setSaved] = useState<{ id: string; parsed: ParsedJobNote; customerId: string } | null>(null);
   const [error, setError] = useState("");
   const [pending, startTransition] = useTransition();
 
-  function saveJob() {
-    setError(""); setMessage("");
+  // A suggestion only: the parsed name is matched against existing customers, never auto-assigned.
+  const suggestion = useMemo(() => {
+    const name = saved?.parsed.customerName?.toLowerCase();
+    return name && !customerId ? customers.find((customer) => customer.name.toLowerCase().startsWith(name) || name.startsWith(customer.name.toLowerCase())) : undefined;
+  }, [saved, customerId, customers]);
+
+  const edit = (apply: () => void) => { apply(); setSaved(null); setError(""); };
+
+  /** Choosing a customer after the note was saved attaches them to that job instead of saving a duplicate. */
+  function chooseCustomer(id: string) {
+    setCustomerId(id); setError("");
+    if (!saved || !id) return setSaved(saved && !id ? null : saved);
     startTransition(async () => {
-      const result = await parseAndSaveJob({ note, customerId: customerId || undefined });
+      const result = await assignJobCustomerAction(saved.id, id);
       if (!result.ok) return setError(result.error);
-      if (!result.data) return setError("Job could not be saved.");
-      setJobId(result.data.id); setParsed(result.data.parsed as Parsed); setMessage("Job parsed and saved. It will still be here after refresh.");
+      setSaved({ ...saved, customerId: id });
+    });
+  }
+
+  function read() {
+    setError("");
+    startTransition(async () => {
+      const result = await saveJobAction({ note, customerId: customerId || undefined });
+      if (!result.ok) return setError(result.error);
+      setSaved({ id: result.data!.id, parsed: result.data!.parsed as ParsedJobNote, customerId });
       router.refresh();
     });
   }
-  function createQuote() {
-    setError(""); setMessage("");
+
+  function makeQuote() {
+    if (!saved) return;
+    setError("");
     startTransition(async () => {
-      const result = await createQuoteFromJob(jobId);
+      const result = await createQuoteFromJobAction(saved.id);
       if (!result.ok) return setError(result.error);
-      router.push("/quotes"); router.refresh();
+      router.push(`/quotes/${result.data!.id}`);
     });
   }
-  const subtotal = parsed?.lines.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0) ?? 0;
-  const tax = parsed?.lines.reduce((sum, line) => sum + Math.round(line.quantity * line.unitPrice * line.taxRate / 100), 0) ?? 0;
 
-  return <section className="split"><div className="panel"><div className="panel-title"><h2>Voice-note transcript or typed note</h2><span>Local parser</span></div>
-    <div className="field"><label htmlFor="customer">Customer</label><select id="customer" value={customerId} onChange={(event) => setCustomerId(event.target.value)}><option value="">Choose a customer to make a quote</option>{customers.map((customer) => <option value={customer.id} key={customer.id}>{customer.name}</option>)}</select></div>
-    <div className="field"><label htmlFor="note">What needs doing?</label><textarea id="note" value={note} onChange={(event) => setNote(event.target.value)} /></div>
-    {error && <p className="notice error-notice" role="alert">{error}</p>}{message && <p className="notice" role="status">{message}</p>}
-    <div className="form-actions"><button onClick={saveJob} disabled={pending}>{pending ? "Saving…" : "Parse & save job"}</button><span className="muted">Your note stays in this workspace.</span></div>
-  </div><div className="panel"><div className="panel-title"><h2>Structured details</h2><span>Saved with the job</span></div>
-    {parsed ? <div className="data-list"><div className="row"><div><span>Customer</span><strong>{parsed.customerName || customers.find((customer) => customer.id === customerId)?.name || "Not assigned"}</strong></div></div>{parsed.lines.map((line, index) => <div className="row" key={`${line.description}-${index}`}><div><strong>{line.description}</strong><span>{line.quantity} × {formatINR(line.unitPrice)} · GST {line.taxRate}%</span></div><strong>{formatINR(line.quantity * line.unitPrice)}</strong></div>)}<div className="row"><div><span>Due date</span><strong>{parsed.dueDate ?? "On receipt"}</strong></div></div><div className="invoice-total"><span>Quote total</span><span>{formatINR(subtotal + tax)}</span></div><div className="form-actions"><button onClick={createQuote} disabled={pending || !customerId}>{pending ? "Creating…" : "Create draft quote"}</button></div></div> : <p className="muted">Save a note to review the customer, services, GST and due date here.</p>}
-  </div></section>;
+  const total = saved?.parsed.lines.reduce((sum, line) => sum + Math.round(line.unitPrice * line.quantity), 0) ?? 0;
+  return <section className="split">
+    <div className="panel"><div className="panel-title"><h2>What needs doing?</h2><span>{parserName === "openai" ? "Read by AI, you check it" : "Read on this server"}</span></div>
+      <div className="field"><label htmlFor="customer">Customer</label><select id="customer" value={customerId} onChange={(event) => chooseCustomer(event.target.value)}><option value="">Choose a customer</option>{customers.map((customer) => <option value={customer.id} key={customer.id}>{customer.name}</option>)}</select></div>
+      <div className="form-actions" style={{ margin: "8px 0 12px" }}><CustomerForm defaultState={defaultState} onCreated={(customer) => { setCustomers((current) => [...current, customer]); chooseCustomer(customer.id); }} /></div>
+      <div className="field"><label htmlFor="note">Job note or voice-note transcript</label><textarea id="note" value={note} onChange={(event) => edit(() => setNote(event.target.value))} placeholder="Ravi Sharma, 2 AC services at 650 each, gas refill ₹2,500, GST 18%, due 30 Nov 2026" /></div>
+      {error && <p className="notice error-notice" role="alert">{error}</p>}
+      <div className="form-actions"><button onClick={read} disabled={pending || note.trim().length < 8}>{pending && !saved ? "Reading…" : "Save and read note"}</button></div>
+    </div>
+    <div className="panel" aria-live="polite"><div className="panel-title"><h2>What we read</h2><span>You can change everything on the quote</span></div>
+      {saved ? <div className="data-list">
+        {saved.parsed.lines.length ? saved.parsed.lines.map((line, index) => <div className="row" key={index}><div><strong>{line.description}</strong><span>{line.quantity} × {formatINR(line.unitPrice)}{line.taxRate === null ? " · GST not said" : ` · GST ${line.taxRate}%`}</span></div><strong>{formatINR(Math.round(line.unitPrice * line.quantity))}</strong></div>) : <p className="muted">No prices found in the note. You can add lines on the quote.</p>}
+        <div className="row"><div><span>Due</span><strong>{saved.parsed.dueDate ?? "Not said"}</strong></div><div className="row-end"><span>Before tax</span><strong>{formatINR(total)}</strong></div></div>
+        {suggestion && <p className="notice">The note mentions {saved.parsed.customerName}. <button type="button" className="secondary small" onClick={() => chooseCustomer(suggestion.id)}>Use {suggestion.name}</button></p>}
+        {!saved.customerId && <p className="notice">Choose the customer above to make a quote.</p>}
+        {canQuote && saved.customerId && <div className="form-actions"><button onClick={makeQuote} disabled={pending}>{pending ? "Creating…" : "Make draft quote"}</button></div>}
+      </div> : <p className="muted">Write the job the way you would on WhatsApp. Prices like 650, Rs 1,200 or ₹2,500.50 and several items work.</p>}
+    </div>
+  </section>;
 }

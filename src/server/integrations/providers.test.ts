@@ -38,7 +38,10 @@ describe("credential-ready providers", () => {
 
   it("creates Razorpay payment links and validates signatures without a network", async () => {
     const provider = new RazorpayProvider("key", "secret", "webhook-secret", async () => new Response(JSON.stringify({ id: "plink_1", short_url: "https://rzp.io/i/1" })));
-    await expect(provider.createPaymentLink({ reference: "PR-1", amount: 250, description: "Invoice", customerName: "Ravi", customerPhone: "+91 99999 99999", callbackUrl: "https://app.example/p/token" })).resolves.toEqual({ id: "plink_1", url: "https://rzp.io/i/1" });
+    let sent: { amount?: number } = {};
+    const paying = new RazorpayProvider("key", "secret", "webhook-secret", async (_url, init) => { sent = JSON.parse(String(init?.body)); return new Response(JSON.stringify({ id: "plink_1", short_url: "https://rzp.io/i/1" })); });
+    await expect(paying.createPaymentLink({ reference: "PR-1", amount: 25050, description: "Invoice", customerName: "Ravi", customerPhone: "+91 99999 99999", callbackUrl: "https://app.example/p/token" })).resolves.toEqual({ id: "plink_1", url: "https://rzp.io/i/1" });
+    expect(sent.amount).toBe(25050);
     const raw = '{"event":"payment_link.paid"}';
     const signature = createHmac("sha256", "webhook-secret").update(raw).digest("hex");
     expect(verifyRazorpaySignature(raw, signature, "webhook-secret")).toBe(true);

@@ -31,3 +31,30 @@ main:focus { outline: none; }
 .sr-only { border: 0; clip: rect(0 0 0 0); height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; white-space: nowrap; width: 1px; }
 .copy-link code { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; display: block; font-size: 12px; margin: 6px 0; overflow-wrap: anywhere; padding: 6px 8px; }
 .copy-link p { margin: 0; }
+.card-list { list-style: none; margin: 0; padding: 0; }
+.card-list li { border-top: 1px solid var(--line); }
+.card-list li:first-child { border-top: 0; }
+.card-row { align-items: center; display: flex; gap: 12px; justify-content: space-between; padding: 12px 0; }
+a.card-row:hover strong { text-decoration: underline; }
+.card-row > div:first-child { min-width: 0; }
+.card-row strong { display: block; font-feature-settings: "tnum"; }
+.card-row span { color: var(--ink-soft); display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.text-link-ink { color: var(--green-dark); font-weight: 700; text-decoration: underline; }
+.line-row { align-items: end; border: 0; border-top: 1px solid var(--line); display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin: 0; padding: 12px 0; }
+.line-row .grow { grid-column: 1 / -1; }
+.line-amount { display: grid; }
+.doc-totals { display: grid; gap: 4px; margin: 16px 0 0 auto; max-width: 320px; }
+.doc-totals div { display: flex; justify-content: space-between; }
+.doc-totals dt { color: var(--ink-soft); }
+.doc-totals dd { font-feature-settings: "tnum"; margin: 0; }
+.doc-totals .grand { border-top: 2px solid var(--ink); font-size: 19px; font-weight: 800; margin-top: 6px; padding-top: 8px; }
+.doc-totals .grand dt { color: var(--ink); }
+.details { display: grid; gap: 6px 14px; grid-template-columns: max-content 1fr; margin: 0 0 14px; }
+.details dt { color: var(--ink-soft); font-size: 13px; }
+.details dd { margin: 0; }
+.action-button { display: grid; gap: 6px; }
+.portal-wide { margin: 0 auto; max-width: 860px; width: 100%; }
+.portal-wide h1 { font-size: 30px; letter-spacing: -.045em; margin: 0 0 6px; }
+.doc-table td, .doc-table th { white-space: nowrap; }
+.doc-table td:first-child { white-space: normal; }
+@media (min-width: 720px) { .line-row { grid-template-columns: 3fr 1fr 1.3fr 1fr 1.2fr 1.2fr auto; } .line-row .grow { grid-column: auto; } }

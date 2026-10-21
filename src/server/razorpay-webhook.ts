@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { createProviders } from "./integrations/providers";
 import type { PaymentProvider } from "./integrations/types";
-import { forWorkspace } from "./persistence";
+import { markPaidFromWebhook } from "./payments";
 import { getPrisma } from "./prisma";
 
 type PaymentRequestLookup = Pick<PrismaClient, "paymentRequest">;
@@ -23,7 +23,7 @@ export async function processRazorpayWebhook(rawBody: string, signature: string 
   const db = dependencies.db ?? getPrisma();
   const request = await db.paymentRequest.findFirst({ where: { provider: "RAZORPAY", providerPaymentLinkId: paymentLinkId }, select: { workspaceId: true, invoiceId: true } });
   if (!request) return { status: 202, body: { received: true, ignored: true } };
-  const markInvoicePaid = dependencies.markInvoicePaid ?? ((workspaceId: string, invoiceId: string) => forWorkspace(workspaceId).invoices.markPaid(invoiceId));
+  const markInvoicePaid = dependencies.markInvoicePaid ?? markPaidFromWebhook;
   await markInvoicePaid(request.workspaceId, request.invoiceId);
   return { status: 200, body: { received: true } };
 }

@@ -16,6 +16,7 @@ export interface MessagingProvider {
   sendTemplate(input: { to: string; template: WhatsAppTemplate }): Promise<DeliveryResult>;
 }
 
+/** amount is integer paise, as Razorpay expects. */
 export type PaymentLinkInput = { reference: string; amount: number; description: string; customerName: string; customerPhone: string; callbackUrl: string };
 export type PaymentLinkResult = { id: string; url: string };
 
