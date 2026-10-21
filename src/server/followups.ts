@@ -58,14 +58,16 @@ export async function ensureOverdueFollowUps(workspaceId: string, now = new Date
       where: { workspaceId, status: "SENT", dueDate: { lt: today }, followUp: null },
       select: { id: true, number: true, totalPaise: true, dueDate: true, customer: { select: { name: true } }, payments: { select: { amountPaise: true } }, creditNote: { select: { totalPaise: true } } },
     });
-    const overdue = candidates.filter((invoice) => balanceOf(invoice.totalPaise, invoice.creditNote?.totalPaise ?? 0, invoice.payments.reduce((sum, payment) => sum + payment.amountPaise, 0)).due > 0);
+    const overdue = candidates
+      .map((invoice) => ({ ...invoice, due: balanceOf(invoice.totalPaise, invoice.creditNote?.totalPaise ?? 0, invoice.payments.reduce((sum, payment) => sum + payment.amountPaise, 0)).due }))
+      .filter((invoice) => invoice.due > 0);
     if (!overdue.length) return;
     await tx.followUp.createMany({
       skipDuplicates: true,
       data: overdue.map((invoice) => ({
         workspaceId, invoiceId: invoice.id,
         subject: `${invoice.number} · ${invoice.customer.name}`,
-        action: `Payment overdue (${formatINR(invoice.totalPaise)} invoice). Send a reminder with the payment link.`,
+        action: `${formatINR(invoice.due)} overdue. Send a reminder with the payment link.`,
         dueAt: istInstant(addDays(toIsoDate(invoice.dueDate!), 1), 9),
       })),
     });

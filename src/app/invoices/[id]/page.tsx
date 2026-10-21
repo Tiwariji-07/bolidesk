@@ -10,11 +10,11 @@ import { RecordPaymentForm, RefundForm, ReverseReceiptButton } from "@/component
 import { PrintButton } from "@/components/print-button";
 import { PageHeader, Status } from "@/components/ui";
 import { toIsoDate } from "@/domain/business-time";
-import { ALLOWED_RATES, type GstScheme } from "@/domain/gst";
+import { ALLOWED_RATES, calculateDocument, type GstScheme } from "@/domain/gst";
 import { formatDate, formatINR } from "@/lib/format";
 import { isDemoMode } from "@/server/env";
 import { can, currentAccess } from "@/server/access";
-import { sellerProblems, storedLines, type BuyerSnapshot, type SellerSnapshot } from "@/server/billing";
+import { sellerProblems, storedLines, workspaceMode, type BuyerSnapshot, type SellerSnapshot } from "@/server/billing";
 import { getPrisma } from "@/server/prisma";
 import { getInvoice, getWorkspace, stuckPaymentLink } from "@/server/queries";
 
@@ -27,6 +27,8 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
 
   if (invoice.status === "DRAFT") {
     const problems = sellerProblems(workspace);
+    // What issuing will charge: recalculated from the lines, as issueInTx does (older drafts may store a stale total).
+    const issueTotal = calculateDocument(lines, workspaceMode(workspace, invoice.placeOfSupply ?? invoice.customer.stateCode ?? workspace.stateCode)).total;
     const editable = can(access, "invoices.write");
     return <DraftGuardProvider><PageHeader eyebrow={`Draft invoice for ${invoice.customer.name}`} title="Draft invoice" action={<Link className="button secondary" href={`/customers/${invoice.customer.id}`}>Customer</Link>} />
       {invoice.quote && <p className="muted">From quote <Link className="text-link-ink" href={`/quotes/${invoice.quote.id}`}>{invoice.quote.number}</Link>.</p>}
@@ -35,7 +37,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
       <section className="panel"><div className="panel-title"><h2>Issue</h2><span>Numbers are given when an invoice is issued</span></div>
         {problems.length ? <ul className="notice error-notice">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul> : <p className="muted">Issue invoice (in the editor above) freezes the lines, your business details and the customer&apos;s details, and gives the next number in this financial year.</p>}
       </section>
-      {can(access, "payments.cash") && invoice.totalPaise > 0 && <section className="panel"><div className="panel-title"><h2>Paid on the spot?</h2><span>Records cash and issues the invoice in one step</span></div><RecordPaymentForm invoiceId={invoice.id} duePaise={invoice.totalPaise} allowNonCash={false} draftVersion={invoice.version} /></section>}</DraftGuardProvider>;
+      {can(access, "payments.cash") && issueTotal > 0 && <section className="panel"><div className="panel-title"><h2>Paid on the spot?</h2><span>Records cash and issues the invoice in one step</span></div><RecordPaymentForm invoiceId={invoice.id} duePaise={issueTotal} allowNonCash={false} draftVersion={invoice.version} /></section>}</DraftGuardProvider>;
   }
 
   const seller = sellerFromSnapshot(invoice.sellerSnapshot as SellerSnapshot | null, { name: workspace.legalName ?? workspace.name, brandName: workspace.brandName });

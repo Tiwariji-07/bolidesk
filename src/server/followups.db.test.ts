@@ -24,7 +24,7 @@ describe("automatic follow-ups (Postgres)", () => {
     await ensureOverdueFollowUps(shop.workspace.id, at("2026-10-20T17:00:00.000Z"));
     expect(await followUps(shop.workspace.id)).toHaveLength(0);
     await Promise.all([ensureOverdueFollowUps(shop.workspace.id, at("2026-10-20T18:31:00.000Z")), ensureOverdueFollowUps(shop.workspace.id, at("2026-10-20T19:31:00.000Z"))]);
-    expect(await followUps(shop.workspace.id)).toMatchObject([{ invoiceId: invoice.id, status: "OPEN", dueAt: at("2026-10-21T03:30:00.000Z") }]);
+    expect(await followUps(shop.workspace.id)).toMatchObject([{ invoiceId: invoice.id, status: "OPEN", dueAt: at("2026-10-21T03:30:00.000Z"), action: expect.stringMatching(/^₹1,180 overdue/) }]);
   });
 
   it("closes the reminder when paid and reopens it if the payment is reversed", async () => {

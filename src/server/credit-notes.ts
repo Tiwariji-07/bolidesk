@@ -10,7 +10,8 @@ import { logActivity, withStaffLock } from "./workspace-tx";
 
 /**
  * Owner only. Cancels an issued invoice in full with a numbered credit note that reverses its exact lines and
- * tax heads. Money already received stays in the ledger and shows as a refund due.
+ * tax heads. Money already received stays in the ledger and shows as a refund due. Invoices issued before tax heads
+ * were stored are reversed by their GST total with the heads left at zero (shown as "GST not split" in reports).
  */
 export async function issueCreditNote(access: Access, input: { invoiceId: string; version: number; reason: string }, provider?: PaymentProvider) {
   const reason = input.reason.trim();
@@ -21,7 +22,6 @@ export async function issueCreditNote(access: Access, input: { invoiceId: string
     if (invoice.creditNote) throw new UserError(`Already cancelled by ${invoice.creditNote.number}.`);
     if (invoice.status === "DRAFT") throw new UserError("A draft has no number yet; just leave it unissued.");
     if (invoice.version !== input.version) throw new ConflictError();
-    if (invoice.cgstPaise + invoice.sgstPaise + invoice.igstPaise !== invoice.taxPaise) throw new UserError("This invoice was issued before BoliDesk stored GST tax heads, so a credit note cannot reverse it exactly. Ask your accountant to issue one manually.");
     const issueDate = businessDate();
     const number = await allocateNumber(tx, await tx.workspace.findUniqueOrThrow({ where: { id: actor.workspaceId } }), "CREDIT_NOTE", issueDate);
     const note = await tx.creditNote.create({ data: {

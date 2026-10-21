@@ -63,7 +63,7 @@ export async function salesRegisterCsv(workspaceId: string, from: IsoDate, to: I
   const buyer = (snapshot: unknown) => (snapshot ?? {}) as { name?: string; gstin?: string | null };
   const rows = [
     ...invoices.map((invoice) => [invoice.documentType === "BILL_OF_SUPPLY" ? "Bill of supply" : "Tax invoice", invoice.number, invoice.issueDate ? toIsoDate(invoice.issueDate) : "", "", buyer(invoice.buyerSnapshot).name, buyer(invoice.buyerSnapshot).gstin, invoice.placeOfSupply, rupees(invoice.subtotalPaise), rupees(invoice.cgstPaise), rupees(invoice.sgstPaise), rupees(invoice.igstPaise), rupees(unsplitGst(invoice)), rupees(invoice.totalPaise)]),
-    ...notes.map((note) => ["Credit note", note.number, toIsoDate(note.issueDate), note.invoice.number, buyer(note.invoice.buyerSnapshot).name, buyer(note.invoice.buyerSnapshot).gstin, note.invoice.placeOfSupply, rupees(-note.subtotalPaise), rupees(-note.cgstPaise), rupees(-note.sgstPaise), rupees(-note.igstPaise), rupees(0), rupees(-note.totalPaise)]),
+    ...notes.map((note) => ["Credit note", note.number, toIsoDate(note.issueDate), note.invoice.number, buyer(note.invoice.buyerSnapshot).name, buyer(note.invoice.buyerSnapshot).gstin, note.invoice.placeOfSupply, rupees(-note.subtotalPaise), rupees(-note.cgstPaise), rupees(-note.sgstPaise), rupees(-note.igstPaise), rupees(-unsplitGst(note)), rupees(-note.totalPaise)]),
   ];
   return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
 }

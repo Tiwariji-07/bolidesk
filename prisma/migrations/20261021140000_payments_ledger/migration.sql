@@ -59,11 +59,11 @@ ALTER TABLE "PaymentRequest"
   ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   ALTER COLUMN "url" DROP NOT NULL;
 UPDATE "PaymentRequest" SET "status" = 'EXPIRED', "lastError" = 'legacy: closed by the payments-ledger migration', "url" = CASE WHEN "provider" = 'DEMO' THEN NULL ELSE "url" END;
--- An unpaid invoice's newest Razorpay link may still be payable at Razorpay. Mark it CANCELLING (not legacy): the next
--- payment-link request, or the retry button, cancels it at Razorpay and records any payment already made on it.
-UPDATE "PaymentRequest" r SET "status" = 'CANCELLING', "lastError" = NULL, "expiresAt" = CURRENT_TIMESTAMP
+-- An invoice's newest old Razorpay link may still be payable at Razorpay (old links had no expiry), paid invoice or not.
+-- Mark it CANCELLING: the invoice shows "Retry closing the old link", which cancels it at Razorpay and records any
+-- payment already made on it. Its legacy marker stays so such a payment is flagged for a check against the old status.
+UPDATE "PaymentRequest" r SET "status" = 'CANCELLING', "expiresAt" = CURRENT_TIMESTAMP
 WHERE r."provider" = 'RAZORPAY' AND r."providerPaymentLinkId" IS NOT NULL
-  AND EXISTS (SELECT 1 FROM "Invoice" i WHERE i."id" = r."invoiceId" AND i."status" <> 'PAID')
   AND r."id" = (SELECT r2."id" FROM "PaymentRequest" r2 WHERE r2."invoiceId" = r."invoiceId" AND r2."provider" = 'RAZORPAY' AND r2."providerPaymentLinkId" IS NOT NULL ORDER BY r2."createdAt" DESC LIMIT 1);
 ALTER TABLE "PaymentRequest" ALTER COLUMN "updatedAt" DROP DEFAULT;
 UPDATE "CustomerPortalToken" SET "revokedAt" = CURRENT_TIMESTAMP WHERE "revokedAt" IS NULL AND "invoiceId" IN (SELECT "invoiceId" FROM "PaymentRequest");

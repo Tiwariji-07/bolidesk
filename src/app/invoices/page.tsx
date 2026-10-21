@@ -15,7 +15,7 @@ export default async function InvoicesPage() {
     <section className="panel"><div className="panel-title"><h2>Invoice register</h2><span>{formatINR(due)} to collect</span></div>
       {invoices.length ? <ul className="card-list">{invoices.map((invoice) => <li key={invoice.id}><Link href={`/invoices/${invoice.id}`} className="card-row">
         <div><strong>{invoice.number ?? "Draft invoice"}</strong><span>{invoice.customer.name} · {storedLines(invoice.linesJson)[0]?.description || "No lines yet"}</span></div>
-        <div className="row-end"><strong>{formatINR(invoice.totalPaise)}</strong><span><Status value={invoice.displayStatus} /> {invoice.dueDate && invoice.status !== "DRAFT" ? `due ${formatDay(invoice.dueDate)}` : ""}</span></div>
+        <div className="row-end"><strong>{formatINR(invoice.balance.due > 0 ? invoice.balance.due : invoice.totalPaise)}</strong>{invoice.balance.due > 0 && invoice.balance.due !== invoice.totalPaise && <span>of {formatINR(invoice.totalPaise)}</span>}<span><Status value={invoice.displayStatus} /> {invoice.dueDate && invoice.status !== "DRAFT" ? `due ${formatDay(invoice.dueDate)}` : ""}</span></div>
       </Link></li>)}</ul> : <EmptyState title="No invoices yet" href="/customers" action="Pick a customer">Start an invoice from a customer or convert an accepted quote.</EmptyState>}
     </section></>;
 }

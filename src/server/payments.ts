@@ -142,15 +142,14 @@ async function applyProviderPayment(tx: Tx, actor: Actor, requestId: string, pay
     return { recorded: false, staleRequestIds: [] as string[] };
   }
   if (payment.status !== "captured") return { recorded: false, staleRequestIds: [] as string[] };
-  // Hold only when the invoice's earlier PAID status is already in the ledger as an opening entry; otherwise the money is new.
-  const opening = request.lastError?.startsWith(LEGACY_MARKER) ? await tx.payment.findFirst({ where: { invoiceId: request.invoiceId, source: "LEGACY" }, select: { id: true } }) : null;
-  if (opening) {
-    await logActivity(tx, actor, `Razorpay payment ${payment.id} (${formatINR(payment.amount)}) arrived on a link from before the payments ledger for ${request.invoice.number}. Not recorded automatically: check it against the earlier paid status.`);
-    return { recorded: false, staleRequestIds: [] as string[] };
-  }
   if (payment.currency !== "INR" || payment.amount <= 0 || payment.amount > request.amountPaise) {
     await logActivity(tx, actor, `Razorpay payment ${payment.id} on ${request.invoice.number} needs review: ${payment.currency} ${payment.amount} paise against a ${request.amountPaise} paise link. Not recorded.`);
     return { recorded: false, staleRequestIds: [] as string[] };
+  }
+  // Captured INR money within the link amount is always recorded. On a link from before the ledger it may duplicate an earlier "marked paid";
+  // the balance then shows a refund due and the owner is told to check it.
+  if (request.lastError?.startsWith(LEGACY_MARKER)) {
+    await logActivity(tx, actor, `Razorpay payment ${payment.id} (${formatINR(payment.amount)}) arrived on a link from before the payments ledger for ${request.invoice.number}. Recorded; check it against the earlier paid status and refund if it was paid twice.`);
   }
   const receiptNumber = await allocateNumber(tx, await tx.workspace.findUniqueOrThrow({ where: { id: request.workspaceId } }), "RECEIPT", businessDate(payment.createdAt ? new Date(payment.createdAt * 1000) : new Date()));
   // Booked at Razorpay's payment time, so a 23:55 payment whose webhook arrives after midnight stays on its own day.

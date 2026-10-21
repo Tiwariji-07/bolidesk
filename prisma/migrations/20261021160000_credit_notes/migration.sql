@@ -33,5 +33,6 @@ ALTER TABLE "CreditNote" ADD CONSTRAINT "CreditNote_workspaceId_fkey" FOREIGN KE
 ALTER TABLE "CreditNote" ADD CONSTRAINT "CreditNote_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE NO ACTION ON UPDATE CASCADE;
 
 
--- A credit note reverses non-negative invoice amounts.
-ALTER TABLE "CreditNote" ADD CONSTRAINT "CreditNote_money_check" CHECK ("subtotalPaise" >= 0 AND "taxPaise" = "cgstPaise" + "sgstPaise" + "igstPaise" AND "totalPaise" = "subtotalPaise" + "taxPaise");
+-- A credit note reverses non-negative invoice amounts. Heads all zero with tax > 0 is allowed only for invoices issued
+-- before tax heads were stored: their GST is reversed as a total, without inventing a CGST/SGST/IGST split.
+ALTER TABLE "CreditNote" ADD CONSTRAINT "CreditNote_money_check" CHECK ("subtotalPaise" >= 0 AND "taxPaise" >= 0 AND ("taxPaise" = "cgstPaise" + "sgstPaise" + "igstPaise" OR ("cgstPaise" = 0 AND "sgstPaise" = 0 AND "igstPaise" = 0)) AND "totalPaise" = "subtotalPaise" + "taxPaise");

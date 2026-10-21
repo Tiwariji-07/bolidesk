@@ -161,7 +161,7 @@ describe("payments ledger (Postgres)", () => {
     expect(await db().payment.count({ where: { invoiceId: invoice.id, entryKind: "REFUND" } })).toBe(1);
   });
 
-  it("holds a replayed webhook for a link closed by the ledger migration instead of counting it twice", async () => {
+  it("records a payment on a pre-ledger link of a paid invoice as refund due and flags it", async () => {
     const { shop, invoice } = await issuedInvoice();
     // Before the ledger this invoice was marked PAID; the migration turned that into a LEGACY opening entry.
     await db().payment.create({ data: { workspaceId: shop.workspace.id, invoiceId: invoice.id, source: "LEGACY", amountPaise: 118000, idempotencyKey: `legacy-opening-${invoice.id}` } });
@@ -169,7 +169,7 @@ describe("payments ledger (Postgres)", () => {
     await db().paymentRequest.create({ data: { workspaceId: shop.workspace.id, invoiceId: invoice.id, reference: `PRL${invoice.id}`, provider: "RAZORPAY", status: "EXPIRED", amountPaise: 118000, providerPaymentLinkId: `plink_l_${invoice.id}`, lastError: "legacy: closed by the payments-ledger migration" } });
     const response = await applyWebhookEvent(new FakeRazorpay(), { kind: "payment", linkId: `plink_l_${invoice.id}`, reference: null, linkStatus: "paid", payment: { id: `pay_l_${invoice.id}`, amount: 118000, currency: "INR", status: "captured" } }, findRequest);
     expect(response.status).toBe(200);
-    expect(await db().payment.count({ where: { invoiceId: invoice.id } })).toBe(1);
+    expect(await db().payment.count({ where: { invoiceId: invoice.id } })).toBe(2);
     expect(await db().activity.findFirst({ where: { workspaceId: shop.workspace.id, body: { contains: "before the payments ledger" } } })).not.toBeNull();
   });
 

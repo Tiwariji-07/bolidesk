@@ -31,7 +31,7 @@ export default async function CustomerPage({ params }: { params: Promise<{ id: s
         {can(access, "customers.write") && <CustomerForm customer={customer} />}
       </section>
       <section className="panel"><div className="panel-title"><h2>{formatINR(due)} outstanding</h2><span>{invoices.length} invoices · {quotes.length} quotes</span></div>
-        <ul className="card-list">{invoices.map((invoice) => <li key={invoice.id}><Link className="card-row" href={`/invoices/${invoice.id}`}><div><strong>{invoice.number ?? "Draft invoice"}</strong></div><div className="row-end"><strong>{formatINR(invoice.totalPaise)}</strong><Status value={invoice.displayStatus} /></div></Link></li>)}
+        <ul className="card-list">{invoices.map((invoice) => <li key={invoice.id}><Link className="card-row" href={`/invoices/${invoice.id}`}><div><strong>{invoice.number ?? "Draft invoice"}</strong></div><div className="row-end"><strong>{formatINR(invoice.balance.due > 0 ? invoice.balance.due : invoice.totalPaise)}</strong>{invoice.balance.due > 0 && invoice.balance.due !== invoice.totalPaise && <span>of {formatINR(invoice.totalPaise)}</span>}<Status value={invoice.displayStatus} /></div></Link></li>)}
           {quotes.map((quote) => <li key={quote.id}><Link className="card-row" href={`/quotes/${quote.id}`}><div><strong>{quote.number ?? "Draft quote"}</strong><span>Quote</span></div><div className="row-end"><strong>{formatINR(quote.totalPaise)}</strong><Status value={quote.status} /></div></Link></li>)}</ul>
       </section>
     </section></>;

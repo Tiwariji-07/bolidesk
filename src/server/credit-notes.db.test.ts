@@ -41,4 +41,13 @@ describe("credit notes (Postgres)", () => {
     await recordRefund(shop.owner, { invoiceId: invoice.id, amount: "500", method: "CASH", reference: "", reason: "Job not done" , idempotencyKey: `r1-${invoice.id}` });
     await expect(recordRefund(shop.owner, { invoiceId: invoice.id, amount: "1", method: "CASH", reference: "", reason: "again" , idempotencyKey: `r2-${invoice.id}` })).rejects.toThrow(/Only ₹0/);
   });
+
+  it("cancels an invoice issued before tax heads existed, reversing its GST as a total", async () => {
+    const { shop, invoice } = await issued();
+    // What the billing migration leaves for an old invoice: tax kept, heads zero.
+    const legacy = await getPrisma().invoice.update({ where: { id: invoice.id }, data: { cgstPaise: 0, sgstPaise: 0, igstPaise: 0 } });
+    await issueCreditNote(shop.owner, { invoiceId: invoice.id, version: legacy.version, reason: "Old job cancelled" });
+    expect(await getPrisma().creditNote.findUniqueOrThrow({ where: { invoiceId: invoice.id } })).toMatchObject({ taxPaise: 18000, cgstPaise: 0, totalPaise: 118000 });
+    expect((await getPrisma().invoice.findUniqueOrThrow({ where: { id: invoice.id } })).status).toBe("CREDITED");
+  });
 });
