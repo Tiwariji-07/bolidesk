@@ -1,3 +1,4 @@
+import bcrypt from "bcrypt";
 import { describe, expect, it } from "vitest";
 import { ROLE_PERMISSIONS, can } from "./access";
 import { authenticateUser, hashPassword, loginThrottle, passwordProblem, registerWorkspaceOwner } from "./auth";
@@ -10,6 +11,12 @@ describe("passwords", () => {
     await expect(authenticateUser(db, "owner@example.test", "wrong password")).resolves.toBeNull();
     await expect(authenticateUser(db, "missing@example.test", "correct horse battery staple")).resolves.toBeNull();
     expect(passwordHash).toMatch(/^\$2[aby]\$/);
+  });
+
+  it("still signs in accounts whose password predates the 72-byte limit", async () => {
+    const legacy = "a".repeat(80);
+    const db = { user: { findUnique: async () => ({ id: "user-a", email: "old@example.test", passwordHash: await bcrypt.hash(legacy, 4) }) } };
+    await expect(authenticateUser(db, "old@example.test", legacy)).resolves.toMatchObject({ id: "user-a" });
   });
 
   it("refuses passwords bcrypt would silently truncate", async () => {

@@ -1,5 +1,5 @@
 /** All money is integer paise. One document is capped well inside Postgres INTEGER. */
-export const MAX_DOCUMENT_PAISE = 20_00_00_000_00; // ₹2,00,00,000 (2 crore)
+export const MAX_DOCUMENT_PAISE = 2_000_000_000; // ₹2,00,00,000 (2 crore), inside Postgres INTEGER
 
 /** "1,250.5" or "1250.50" -> 125050. Returns null for anything that is not a plain non-negative rupee amount. */
 export function parseRupees(input: string): number | null {

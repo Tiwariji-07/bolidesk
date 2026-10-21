@@ -29,6 +29,15 @@ describe("staff access (Postgres)", () => {
     await expect(acceptInvite({ token: tokenFrom(url), password: "attacker-chosen-password" })).rejects.toThrow(/password does not match/);
   });
 
+  it("throttles password guesses made through invite links", async () => {
+    const shop = await makeShop();
+    const victim = await makeShop("Victim");
+    await getPrisma().user.update({ where: { id: victim.owner.userId }, data: { passwordHash: await (await import("bcrypt")).default.hash("the real password!", 4) } });
+    const { url } = await inviteMember(shop.owner, { email: victim.owner.email, role: "MEMBER" });
+    for (let index = 0; index < 8; index += 1) await expect(acceptInvite({ token: tokenFrom(url), password: `guess ${index} password` })).rejects.toThrow(/does not match/);
+    await expect(acceptInvite({ token: tokenFrom(url), password: "the real password!" })).rejects.toThrow(/Too many attempts/);
+  });
+
   it("stops a removed member's in-flight and later writes", async () => {
     const shop = await makeShop();
     await removeMember(shop.owner, shop.technician.membershipId);

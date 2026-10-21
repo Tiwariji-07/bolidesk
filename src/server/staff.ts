@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { MembershipRole } from "@prisma/client";
 import { ROLE_LABELS, type Access } from "./access";
-import { authenticateUser, hashPassword, normalizeEmail } from "./auth";
+import { authenticateUser, hashPassword, loginThrottle, normalizeEmail } from "./auth";
 import { publicAppUrl } from "./env";
 import { ConflictError, UserError } from "./errors";
 import { getPrisma } from "./prisma";
@@ -82,7 +82,15 @@ export async function acceptInvite(input: { token: string; password: string; nam
   const invite = await db.workspaceInvite.findUnique({ where: { tokenHash } });
   if (!invite || invite.acceptedAt || invite.revokedAt || invite.expiresAt <= new Date()) throw new UserError("This invite link is no longer valid. Ask the owner for a new one.");
   const existing = await db.user.findUnique({ where: { email: invite.email } });
-  if (existing && !(await authenticateUser(db, invite.email, input.password))) throw new UserError("That password does not match your existing BoliDesk account.");
+  if (existing) {
+    // Same throttle as sign-in, so an invite cannot be used to guess another account's password.
+    if (loginThrottle.blocked(invite.email)) throw new UserError("Too many attempts. Wait 15 minutes and try again.");
+    if (!(await authenticateUser(db, invite.email, input.password))) {
+      loginThrottle.fail(invite.email);
+      throw new UserError("That password does not match your existing BoliDesk account.");
+    }
+    loginThrottle.clear(invite.email);
+  }
   const passwordHash = existing ? null : await hashPassword(input.password);
   return withSystemLock(invite.workspaceId, async (tx) => {
     const consumed = await tx.workspaceInvite.updateMany({ where: { id: invite.id, tokenHash, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } }, data: { acceptedAt: new Date() } });

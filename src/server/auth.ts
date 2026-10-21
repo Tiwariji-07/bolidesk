@@ -22,9 +22,11 @@ type AuthenticationDatabase = {
   user: { findUnique: (input: { where: { email: string } }) => Promise<{ id: string; email: string; passwordHash: string } | null> };
 };
 
-/** Compares against a dummy hash for unknown emails so response time does not reveal which emails exist. */
+/**
+ * Compares against a dummy hash for unknown emails so response time does not reveal which emails exist.
+ * The 72-byte limit applies only when setting a password, so accounts created before it keep working.
+ */
 export async function authenticateUser(db: AuthenticationDatabase, email: string, password: string) {
-  if (Buffer.byteLength(password, "utf8") > MAX_PASSWORD_BYTES) return null;
   const user = await db.user.findUnique({ where: { email: normalizeEmail(email) } });
   const matches = await bcrypt.compare(password, user?.passwordHash ?? DUMMY_HASH);
   return user && matches ? { id: user.id, email: user.email } : null;

@@ -7,6 +7,7 @@ import { authenticateUser, loginThrottle, normalizeEmail, passwordProblem, regis
 import { readEnvironment } from "@/server/env";
 import { userMessage } from "@/server/errors";
 import { getPrisma } from "@/server/prisma";
+import { requireAccess } from "@/server/access";
 import { endSession, startSession } from "@/server/session";
 import { acceptInvite } from "@/server/staff";
 
@@ -63,6 +64,16 @@ export async function acceptInviteAction(_state: AuthFormState, formData: FormDa
   } catch (error) {
     return { error: userMessage(error) };
   }
+  redirect("/");
+}
+
+/** Moves the current device to another shop the same user belongs to. The membership must be the signed-in user's own. */
+export async function switchWorkspace(membershipId: string) {
+  const access = await requireAccess();
+  const membership = await getPrisma().membership.findFirst({ where: { id: membershipId, userId: access.userId }, select: { id: true } });
+  if (!membership) redirect("/switch");
+  await endSession();
+  await startSession(membership.id);
   redirect("/");
 }
 

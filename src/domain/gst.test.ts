@@ -11,6 +11,8 @@ describe("money", () => {
     expect(parseRupees("1,25,000.50")).toBe(12500050);
     expect(parseRupees("₹ 99.99")).toBe(9999);
     for (const bad of ["1,2,50", "-5", "1e3", "12.345", "", "abc"]) expect(parseRupees(bad)).toBeNull();
+    expect(parseRupees("2,00,00,000")).toBe(2_000_000_000);
+    expect(parseRupees("21474836.48")).toBeNull();
   });
 
   it("round-trips paise to form text and rounds half up", () => {
@@ -52,6 +54,7 @@ describe("GST calculation", () => {
     expect(validateLines([{ ...line(1000), code: undefined }], { profile: "REFORM_2025", mode: "INTRA", issuing: true })[0].message).toMatch(/SAC/);
     expect(validateLines([{ ...line(1000), code: undefined }], { profile: "REFORM_2025", mode: "NONE", issuing: true })).toEqual([]);
     expect(validateLines([line(1000, 0.0001)], { profile: "REFORM_2025", mode: "INTRA", issuing: false })[0].message).toMatch(/Quantity/);
+    for (const quantity of [1.001, 1.003, 1.005, 2.675]) expect(validateLines([line(1000, quantity)], { profile: "REFORM_2025", mode: "INTRA", issuing: false })).toEqual([]);
   });
 });
 

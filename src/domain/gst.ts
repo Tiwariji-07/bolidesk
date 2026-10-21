@@ -56,7 +56,7 @@ export function validateLines(lines: DocumentLine[], options: { profile: GstRate
   lines.forEach((line, index) => {
     const at = index + 1;
     if (!line.description.trim() || line.description.length > 240) issues.push({ line: at, message: "Describe the work in 1–240 characters." });
-    if (!(line.quantity > 0) || line.quantity > 100000 || Math.round(line.quantity * 1000) !== line.quantity * 1000) issues.push({ line: at, message: "Quantity must be positive with at most three decimals." });
+    if (!(line.quantity > 0) || line.quantity > 100000 || Math.abs(line.quantity * 1000 - Math.round(line.quantity * 1000)) > 1e-6) issues.push({ line: at, message: "Quantity must be positive with at most three decimals." });
     if (!Number.isInteger(line.unitPrice) || line.unitPrice < 0) issues.push({ line: at, message: "Enter a valid price." });
     if (options.mode !== "NONE" && !ALLOWED_RATES[options.profile].includes(line.taxRate)) issues.push({ line: at, message: `GST rate must be one of ${ALLOWED_RATES[options.profile].join("%, ")}%.` });
     if (line.code && !/^(?:\d{4}|\d{6}|\d{8})$/.test(line.code)) issues.push({ line: at, message: "SAC/HSN must be 4, 6 or 8 digits." });
