@@ -1,4 +1,5 @@
 import type { Invoice } from "@prisma/client";
+import { businessDate, istInstant } from "@/domain/business-time";
 import { balanceOf, invoiceDisplayStatus, type Balance } from "@/domain/documents";
 import { getPrisma } from "./prisma";
 
@@ -56,8 +57,25 @@ export function getCustomer(workspaceId: string, id: string) {
   return getPrisma().customer.findFirst({ where: { id, workspaceId } });
 }
 
-export function listJobs(workspaceId: string) {
-  return getPrisma().job.findMany({ where: { workspaceId }, include: { customer: { select: { id: true, name: true } }, quote: { select: { id: true, number: true, status: true } } }, orderBy: { createdAt: "desc" }, take: 100 });
+/** Open and scheduled jobs first (soonest visit first), then the latest closed ones. */
+export async function listJobs(workspaceId: string, assigneeUserId?: string) {
+  const include = { customer: { select: { id: true, name: true, phone: true, address: true } }, assignee: { select: { id: true, name: true, email: true } }, quote: { select: { id: true, number: true, status: true } } } as const;
+  const scope = { workspaceId, ...(assigneeUserId ? { assigneeUserId } : {}) };
+  const [active, closed] = await Promise.all([
+    getPrisma().job.findMany({ where: { ...scope, status: { in: ["OPEN", "SCHEDULED"] } }, include, orderBy: [{ scheduledAt: { sort: "asc", nulls: "last" } }, { createdAt: "desc" }], take: 100 }),
+    getPrisma().job.findMany({ where: { ...scope, status: { in: ["DONE", "CANCELLED"] } }, include, orderBy: { createdAt: "desc" }, take: 20 }),
+  ]);
+  return [...active, ...closed];
+}
+
+/** Scheduled visits on the IST calendar day of `at`, for one person or the whole shop. */
+export function visitsOn(workspaceId: string, at: Date, assigneeUserId?: string) {
+  const start = istInstant(businessDate(at), 0);
+  return getPrisma().job.findMany({ where: { workspaceId, status: "SCHEDULED", scheduledAt: { gte: start, lt: new Date(start.getTime() + 86_400_000) }, ...(assigneeUserId ? { assigneeUserId } : {}) }, include: { customer: { select: { name: true, address: true } }, assignee: { select: { name: true, email: true } } }, orderBy: { scheduledAt: "asc" } });
+}
+
+export function listTeamMembers(workspaceId: string) {
+  return getPrisma().membership.findMany({ where: { workspaceId }, orderBy: { createdAt: "asc" }, select: { role: true, user: { select: { id: true, name: true, email: true } } } });
 }
 
 export function getJob(workspaceId: string, id: string) {

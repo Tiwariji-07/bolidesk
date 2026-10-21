@@ -56,6 +56,13 @@ enum PaymentProvider {
   RAZORPAY
 }
 
+enum JobStatus {
+  OPEN
+  SCHEDULED
+  DONE
+  CANCELLED
+}
+
 enum PaymentMethod {
   CASH
   UPI
@@ -114,6 +121,7 @@ model User {
   invitesCreated WorkspaceInvite[] @relation("InvitesCreated")
   activities     Activity[]
   payments       Payment[]
+  jobsAssigned   Job[]             @relation("JobsAssigned")
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 }
@@ -230,9 +238,16 @@ model Job {
   customer    Customer? @relation(fields: [customerId], references: [id])
   note        String
   parsedJson  Json?
+  status      JobStatus @default(OPEN)
+  /** The technician doing the visit. */
+  assigneeUserId String?
+  assignee    User?     @relation("JobsAssigned", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  scheduledAt DateTime?
+  doneAt      DateTime?
   quote       Quote?
   createdAt   DateTime  @default(now())
   @@index([workspaceId, createdAt])
+  @@index([workspaceId, assigneeUserId, status])
 }
 
 model Quote {

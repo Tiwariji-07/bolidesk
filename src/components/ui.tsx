@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-const LABELS: Record<string, string> = { PART_PAID: "part paid", CREDITED: "credited", INVOICED: "invoiced", SENT: "sent", DRAFT: "draft", PAID: "paid", OVERDUE: "overdue", ACCEPTED: "accepted", REJECTED: "declined", OPEN: "open", SNOOZED: "snoozed", DONE: "done", ACTIVE: "active", PENDING: "pending", CANCELLED: "cancelled", EXPIRED: "expired", DELIVERED: "delivered", READ: "read", FAILED: "failed" };
+const LABELS: Record<string, string> = { PART_PAID: "part paid", CREDITED: "credited", INVOICED: "invoiced", SENT: "sent", DRAFT: "draft", PAID: "paid", OVERDUE: "overdue", ACCEPTED: "accepted", REJECTED: "declined", OPEN: "open", SNOOZED: "snoozed", DONE: "done", ACTIVE: "active", PENDING: "pending", CANCELLED: "cancelled", EXPIRED: "expired", DELIVERED: "delivered", READ: "read", FAILED: "failed", SCHEDULED: "scheduled" };
 
 export function Status({ value }: { value: string }) {
   const tone = ["PAID", "ACCEPTED", "INVOICED", "DONE", "DELIVERED", "READ"].includes(value) ? "good" : ["OVERDUE", "REJECTED", "FAILED"].includes(value) ? "bad" : ["DRAFT", "CREDITED", "CANCELLED", "EXPIRED", "SNOOZED"].includes(value) ? "muted" : "warn";

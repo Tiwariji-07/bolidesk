@@ -10,6 +10,7 @@ import { issueCreditNote } from "@/server/credit-notes";
 import { sendInvoiceMessage, type MessagePurpose } from "@/server/delivery";
 import { completeFollowUp, createFollowUp, snoozeFollowUp } from "@/server/followups";
 import { createProviders } from "@/server/integrations/providers";
+import { scheduleJob, setJobStatus } from "@/server/jobs";
 import { createPaymentRequest, recordPayment, recordRefund, retryStuckRequests, reversePayment } from "@/server/payments";
 import { sharePortalLink } from "@/server/portal";
 
@@ -51,6 +52,23 @@ export async function assignJobCustomerAction(jobId: string, customerId: string)
   return attempt(async () => {
     await assignJobCustomer(await requireAccess("jobs.write"), id(jobId, "Job"), id(customerId, "Customer"));
     refresh("/jobs");
+  });
+}
+
+export async function scheduleJobAction(jobId: string, values: { assigneeUserId?: string; visit?: string }) {
+  return attempt(async () => {
+    // The visit time is typed in IST (datetime-local has no zone).
+    const visit = values.visit ? new Date(`${values.visit}:00+05:30`) : null;
+    if (visit && Number.isNaN(visit.getTime())) throw new UserError("Enter a valid visit time.");
+    await scheduleJob(await requireAccess("jobs.assign"), id(jobId, "Job"), { assigneeUserId: values.assigneeUserId || null, scheduledAt: visit });
+    refresh("/jobs", "/");
+  });
+}
+
+export async function setJobStatusAction(jobId: string, status: "OPEN" | "DONE" | "CANCELLED") {
+  return attempt(async () => {
+    await setJobStatus(await requireAccess("jobs.write"), id(jobId, "Job"), z.enum(["OPEN", "DONE", "CANCELLED"]).parse(status));
+    refresh("/jobs", "/");
   });
 }
 

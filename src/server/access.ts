@@ -6,11 +6,11 @@ import { findSession, sessionToken, type ActiveSession } from "./session";
 export const ROLE_LABELS: Record<MembershipRole, string> = { OWNER: "Owner", ADMIN: "Office", MEMBER: "Technician" };
 
 export type Permission =
-  | "customers.write" | "jobs.write" | "quotes.draft" | "quotes.decide" | "invoices.write" | "portal.share"
+  | "customers.write" | "jobs.write" | "jobs.assign" | "quotes.draft" | "quotes.decide" | "invoices.write" | "portal.share"
   | "payments.request" | "payments.cash" | "payments.manual" | "payments.correct" | "credit.issue"
   | "followups.write" | "messages.send" | "ledger.view" | "settings.write" | "staff.manage";
 
-const OFFICE: Permission[] = ["customers.write", "jobs.write", "quotes.draft", "quotes.decide", "invoices.write", "portal.share", "payments.request", "payments.cash", "payments.manual", "followups.write", "messages.send", "ledger.view"];
+const OFFICE: Permission[] = ["customers.write", "jobs.write", "jobs.assign", "quotes.draft", "quotes.decide", "invoices.write", "portal.share", "payments.request", "payments.cash", "payments.manual", "followups.write", "messages.send", "ledger.view"];
 const TECHNICIAN: Permission[] = ["customers.write", "jobs.write", "quotes.draft", "payments.cash", "followups.write"];
 
 export const ROLE_PERMISSIONS: Record<MembershipRole, ReadonlySet<Permission>> = {

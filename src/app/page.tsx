@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { PageHeader, Status } from "@/components/ui";
 import { formatDate, formatINR, formatTime } from "@/lib/format";
-import { currentAccess } from "@/server/access";
+import { can, currentAccess } from "@/server/access";
 import { ensureOverdueFollowUps } from "@/server/followups";
-import { listActivities, listInvoices, listQuotes } from "@/server/queries";
+import { listActivities, listInvoices, listQuotes, visitsOn } from "@/server/queries";
 
 export default async function Dashboard() {
   const access = await currentAccess();
   await ensureOverdueFollowUps(access.workspaceId);
-  const [invoices, quotes, activities] = await Promise.all([listInvoices(access.workspaceId), listQuotes(access.workspaceId), listActivities(access.workspaceId)]);
+  const [invoices, quotes, activities, visits] = await Promise.all([listInvoices(access.workspaceId), listQuotes(access.workspaceId), listActivities(access.workspaceId), visitsOn(access.workspaceId, new Date(), can(access, "jobs.assign") ? undefined : access.userId)]);
   const open = invoices.filter((invoice) => invoice.balance.due > 0 && invoice.status === "SENT");
   const overdue = open.filter((invoice) => invoice.displayStatus === "OVERDUE");
   const sum = (rows: typeof invoices) => rows.reduce((total, invoice) => total + invoice.balance.due, 0);
@@ -16,6 +16,7 @@ export default async function Dashboard() {
   const waiting = quotes.filter((quote) => quote.status === "SENT");
   return <><PageHeader eyebrow={access.workspaceName} title="Keep today moving" action={<Link href="/jobs" className="button">+ Capture a job</Link>} />
     <section className="command"><div><p className="eyebrow">Cash desk</p><h2>{formatINR(sum(open))} to collect</h2><p>{open.length ? `${open.length} issued invoice${open.length === 1 ? "" : "s"} unpaid${overdue.length ? `, ${overdue.length} overdue` : ""}.` : "Nothing waiting to be collected."}</p></div><Link href="/follow-ups" className="text-link">Open follow-up queue →</Link></section>
+    {visits.length > 0 && <section className="panel"><div className="panel-title"><h2>Visits today</h2><Link className="text-link-ink" href="/jobs">All jobs</Link></div><ul className="card-list">{visits.map((visit) => <li key={visit.id}><Link className="card-row" href="/jobs"><div><strong>{formatTime(visit.scheduledAt!)} · {visit.customer?.name ?? "Customer"}</strong><span>{visit.customer?.address ?? visit.note}</span></div><span className="muted">{visit.assignee?.name ?? visit.assignee?.email ?? "Not assigned"}</span></Link></li>)}</ul></section>}
     <section className="split">
       <div className="panel"><div className="panel-title"><h2>Today</h2><span>Live</span></div>
         <dl className="totals"><div><dt>Overdue</dt><dd>{formatINR(sum(overdue))}</dd><small>{overdue.length} invoices past due</small></div><div><dt>Quotes waiting</dt><dd>{waiting.length}</dd><small>sent, no answer yet</small></div><div><dt>Drafts</dt><dd>{drafts}</dd><small>quotes and invoices to finish</small></div></dl>
