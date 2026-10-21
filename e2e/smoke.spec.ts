@@ -53,6 +53,15 @@ test("a job note becomes an issued, paid invoice", async ({ page }) => {
   await page.getByRole("button", { name: "Issue invoice" }).click();
   await expect(page.getByRole("heading", { name: /^BDI-\d{4}-\d{6}$/ })).toBeVisible();
   await expect(page.getByText("Tax Invoice")).toBeVisible();
-  await page.getByRole("button", { name: "Record full payment" }).click();
+  // Part payment by cash, then the rest by UPI with a reference.
+  await page.getByLabel("Amount received (₹)").fill("1,000");
+  await page.getByRole("button", { name: "Record payment" }).click();
+  await expect(page.getByText(/Receipt BDR-\d{4}-\d{6} recorded/)).toBeVisible();
+  await expect(page.locator(".page-header .status")).toHaveText("part paid");
+  await page.getByLabel("How").selectOption("UPI");
+  await page.getByLabel("UPI / bank reference").fill("UTR998877");
+  await page.getByRole("button", { name: "Record payment" }).click();
   await expect(page.locator(".page-header .status")).toHaveText("paid");
+  await page.getByRole("link", { name: "Receipt" }).first().click();
+  await expect(page.getByRole("heading", { name: /^BDR-/ })).toBeVisible();
 });

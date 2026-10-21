@@ -56,6 +56,38 @@ enum PaymentProvider {
   RAZORPAY
 }
 
+enum PaymentMethod {
+  CASH
+  UPI
+  CARD
+  BANK
+  RAZORPAY
+}
+
+enum PaymentSource {
+  MANUAL
+  RAZORPAY
+  LEGACY
+}
+
+/** Ledger rows are immutable: corrections are a REVERSAL of a receipt, money returned is a REFUND. */
+enum PaymentEntryKind {
+  RECEIPT
+  REVERSAL
+  REFUND
+}
+
+/** PENDING: reserved, provider call in progress or uncertain. CANCELLING: stale, provider cancel not yet confirmed. */
+enum PaymentRequestStatus {
+  PENDING
+  ACTIVE
+  CANCELLING
+  PAID
+  CANCELLED
+  EXPIRED
+  FAILED
+}
+
 enum DeliveryChannel {
   WHATSAPP
 }
@@ -79,6 +111,7 @@ model User {
   memberships    Membership[]
   invitesCreated WorkspaceInvite[] @relation("InvitesCreated")
   activities     Activity[]
+  payments       Payment[]
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 }
@@ -159,6 +192,7 @@ model Workspace {
   followUps     FollowUp[]
   activities    Activity[]
   paymentRequests PaymentRequest[]
+  payments      Payment[]
   deliveryLogs  DeliveryLog[]
   portalTokens  CustomerPortalToken[]
   createdAt     DateTime   @default(now())
@@ -256,7 +290,7 @@ model Invoice {
   sellerSnapshot Json?
   buyerSnapshot Json?
   paidAt      DateTime?
-  paymentUrl  String?
+  payments    Payment[]
   paymentRequests PaymentRequest[]
   deliveryLogs DeliveryLog[]
   portalTokens CustomerPortalToken[]
@@ -301,19 +335,60 @@ model Activity {
   @@index([workspaceId, createdAt])
 }
 
+/** A payment link. At most one PENDING/ACTIVE/CANCELLING request per invoice (partial unique index in SQL). */
 model PaymentRequest {
   id          String   @id @default(cuid())
   workspaceId String
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   invoiceId   String
   invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  /** Sent to the provider as reference_id; retries of an uncertain attempt reuse it. */
   reference   String   @unique
   provider    PaymentProvider @default(DEMO)
+  status      PaymentRequestStatus @default(PENDING)
   providerPaymentLinkId String? @unique
-  amount      Int
-  url         String
+  amountPaise Int
+  /** Provider's payable URL. Never a customer-portal URL (those carry a bearer token). */
+  url         String?
+  expiresAt   DateTime?
+  lastError   String?
+  createdByUserId String?
+  payments    Payment[]
   createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
   @@index([workspaceId, invoiceId])
+}
+
+model Payment {
+  id               String           @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invoiceId        String
+  invoice          Invoice          @relation(fields: [invoiceId], references: [id], onDelete: NoAction)
+  paymentRequestId String?
+  paymentRequest   PaymentRequest?  @relation(fields: [paymentRequestId], references: [id], onDelete: SetNull)
+  entryKind        PaymentEntryKind @default(RECEIPT)
+  source           PaymentSource
+  /** Positive for receipts, negative for reversals and refunds. */
+  amountPaise      Int
+  method           PaymentMethod?
+  reference        String?
+  receiptNumber    String?
+  idempotencyKey   String
+  providerPaymentId String?         @unique
+  reversesPaymentId String?         @unique
+  reversesPayment  Payment?         @relation("PaymentReversal", fields: [reversesPaymentId], references: [id], onDelete: NoAction)
+  reversal         Payment?         @relation("PaymentReversal")
+  recordedByUserId String?
+  recordedBy       User?            @relation(fields: [recordedByUserId], references: [id], onDelete: SetNull)
+  reason           String?
+  occurredAt       DateTime         @default(now())
+  createdAt        DateTime         @default(now())
+
+  @@unique([workspaceId, receiptNumber])
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, invoiceId])
+  @@index([workspaceId, occurredAt])
 }
 
 model DeliveryLog {

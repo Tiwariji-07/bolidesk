@@ -8,11 +8,14 @@ export function getWorkspace(workspaceId: string) {
   return getPrisma().workspace.findUniqueOrThrow({ where: { id: workspaceId } });
 }
 
-type InvoiceMoney = Pick<Invoice, "status" | "totalPaise" | "dueDate">;
+type InvoiceMoney = Pick<Invoice, "status" | "totalPaise" | "dueDate"> & { payments: { amountPaise: number }[] };
 
+/** Balance from the ledger. Every invoice query below includes its payment amounts. */
 export function invoiceBalance(invoice: InvoiceMoney): Balance {
-  return balanceOf(invoice.totalPaise, 0, invoice.status === "PAID" ? invoice.totalPaise : 0);
+  return balanceOf(invoice.totalPaise, 0, invoice.payments.reduce((sum, payment) => sum + payment.amountPaise, 0));
 }
+
+const paymentAmounts = { payments: { select: { amountPaise: true } } } as const;
 
 export function withBalance<T extends InvoiceMoney>(invoice: T) {
   const balance = invoiceBalance(invoice);
@@ -20,12 +23,12 @@ export function withBalance<T extends InvoiceMoney>(invoice: T) {
 }
 
 export async function listInvoices(workspaceId: string) {
-  const invoices = await getPrisma().invoice.findMany({ where: { workspaceId }, include: { customer: { select: { id: true, name: true } } }, orderBy: [{ issuedAt: { sort: "desc", nulls: "first" } }, { createdAt: "desc" }] });
+  const invoices = await getPrisma().invoice.findMany({ where: { workspaceId }, include: { customer: { select: { id: true, name: true } }, ...paymentAmounts }, orderBy: [{ issuedAt: { sort: "desc", nulls: "first" } }, { createdAt: "desc" }] });
   return invoices.map(withBalance);
 }
 
 export async function getInvoice(workspaceId: string, id: string) {
-  const invoice = await getPrisma().invoice.findFirst({ where: { id, workspaceId }, include: { customer: true, quote: { select: { id: true, number: true } } } });
+  const invoice = await getPrisma().invoice.findFirst({ where: { id, workspaceId }, include: { customer: true, quote: { select: { id: true, number: true } }, payments: { orderBy: { occurredAt: "asc" }, include: { recordedBy: { select: { name: true, email: true } }, reversal: { select: { id: true } } } }, paymentRequests: { where: { status: { in: ["PENDING", "ACTIVE", "CANCELLING"] } }, take: 1 } } });
   return invoice ? withBalance(invoice) : null;
 }
 

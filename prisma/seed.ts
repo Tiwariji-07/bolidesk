@@ -7,7 +7,7 @@ import { convertQuote, createQuoteFromJob, issueInvoice, moveQuote, saveInvoiceD
 import { createCustomer } from "../src/server/customers";
 import { createFollowUp } from "../src/server/followups";
 import { createProviders } from "../src/server/integrations/providers";
-import { recordFullPayment } from "../src/server/payments";
+import { recordPayment } from "../src/server/payments";
 import { getPrisma } from "../src/server/prisma";
 import { hashSessionToken } from "../src/server/session";
 
@@ -59,7 +59,7 @@ async function main() {
   await moveQuote(owner, amanQuote.id, "SENT");
   await moveQuote(owner, amanQuote.id, "ACCEPTED");
   const amanDraft = await convertQuote(owner, amanQuote.id);
-  await recordFullPayment(owner, amanDraft.id);
+  await recordPayment(owner, { invoiceId: amanDraft.id, amount: "5,310", method: "CASH", idempotencyKey: "seed-aman-cash" });
 
   // Meera: installation quote sent and waiting.
   const meeraJob = await saveJob(owner, { note: "Meera Nair, split AC installation at 10,000, copper piping at Rs 1,800, GST 18%", customerId: meera.id }, parser);

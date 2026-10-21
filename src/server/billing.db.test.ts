@@ -3,7 +3,7 @@ import { makeShop } from "@/test/fixtures";
 import { AccessError } from "./access";
 import { convertQuote, createBlankInvoice, createBlankQuote, issueInvoice, moveQuote, saveInvoiceDraft, saveQuoteDraft } from "./billing";
 import { createCustomer, updateCustomer } from "./customers";
-import { recordFullPayment } from "./payments";
+import { recordPayment } from "./payments";
 import { getPrisma } from "./prisma";
 
 const line = { description: "AC service", quantity: 2, unitPrice: "650.50", taxRate: 18, code: "998719" };
@@ -93,7 +93,7 @@ describe("billing documents (Postgres)", () => {
     const draft = await draftInvoice(shop);
     await expect(issueInvoice(shop.technician, { id: draft.id, version: draft.version })).rejects.toBeInstanceOf(AccessError);
     await expect(saveInvoiceDraft(shop.technician, { id: draft.id, version: draft.version, lines: [line] })).rejects.toBeInstanceOf(AccessError);
-    await recordFullPayment(shop.technician, draft.id);
+    await recordPayment(shop.technician, { invoiceId: draft.id, amount: "1,535.18", method: "CASH", idempotencyKey: "tech-cash-1" });
     expect(await getPrisma().invoice.findUniqueOrThrow({ where: { id: draft.id } })).toMatchObject({ status: "PAID", number: expect.stringMatching(/^TSI-/) });
   });
 

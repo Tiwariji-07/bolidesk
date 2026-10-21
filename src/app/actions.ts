@@ -8,7 +8,7 @@ import { createCustomer, updateCustomer, updateSettings, type CustomerInput, typ
 import { attempt, UserError } from "@/server/errors";
 import { completeFollowUp, createFollowUp, snoozeFollowUp } from "@/server/followups";
 import { createProviders } from "@/server/integrations/providers";
-import { createPaymentRequest, recordFullPayment } from "@/server/payments";
+import { createPaymentRequest, recordPayment, recordRefund, reversePayment } from "@/server/payments";
 import { sharePortalLink } from "@/server/portal";
 
 const refresh = (...paths: string[]) => paths.forEach((path) => revalidatePath(path));
@@ -119,14 +119,32 @@ export async function createPaymentRequestAction(invoiceId: string) {
   return attempt(async () => {
     const request = await createPaymentRequest(await requireAccess("payments.request"), id(invoiceId, "Invoice"), createProviders().payments);
     refresh("/invoices", `/invoices/${invoiceId}`);
-    return request;
+    // Customers get the private invoice page; it carries the Razorpay button when one exists.
+    return { url: request.portalUrl, demo: request.demo };
   }, "The payment link could not be created. Try again in a minute.");
 }
 
-export async function recordFullPaymentAction(invoiceId: string) {
+export async function recordPaymentAction(values: { invoiceId: string; amount: string; method: string; reference?: string; idempotencyKey: string }) {
   return attempt(async () => {
-    await recordFullPayment(await requireAccess("payments.cash"), id(invoiceId, "Invoice"));
-    refresh("/invoices", `/invoices/${invoiceId}`, "/", "/follow-ups");
+    const access = await requireAccess(values.method === "CASH" ? "payments.cash" : "payments.manual");
+    const result = await recordPayment(access, values as never, createProviders().payments);
+    refresh("/invoices", `/invoices/${values.invoiceId}`, "/", "/follow-ups", "/reports");
+    return result;
+  });
+}
+
+export async function reversePaymentAction(paymentId: string, invoiceId: string, reason: string) {
+  return attempt(async () => {
+    await reversePayment(await requireAccess("payments.correct"), id(paymentId, "Receipt"), String(reason ?? ""), createProviders().payments);
+    refresh("/invoices", `/invoices/${invoiceId}`, "/", "/reports");
+  });
+}
+
+export async function recordRefundAction(values: { invoiceId: string; amount: string; method: "CASH" | "UPI" | "CARD" | "BANK"; reference: string; reason: string }) {
+  return attempt(async () => {
+    const method = z.enum(["CASH", "UPI", "CARD", "BANK"]).parse(values.method);
+    await recordRefund(await requireAccess("payments.correct"), { ...values, method });
+    refresh("/invoices", `/invoices/${values.invoiceId}`, "/", "/reports");
   });
 }
 

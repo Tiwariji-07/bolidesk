@@ -1,14 +1,16 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { createPaymentRequestAction, issueInvoiceAction, recordFullPaymentAction, sharePortalLinkAction } from "@/app/actions";
+import { createPaymentRequestAction, issueInvoiceAction, sharePortalLinkAction } from "@/app/actions";
 import { ActionButton } from "@/components/action-button";
 import { buyerFromSnapshot, DocumentView, sellerFromSnapshot } from "@/components/document-view";
 import { LineEditor } from "@/components/line-editor";
+import { RecordPaymentForm, RefundForm, ReverseReceiptButton } from "@/components/payment-panel";
 import { PrintButton } from "@/components/print-button";
 import { PageHeader, Status } from "@/components/ui";
 import { toIsoDate } from "@/domain/business-time";
 import { ALLOWED_RATES, type GstScheme } from "@/domain/gst";
-import { formatINR } from "@/lib/format";
+import { formatDate, formatINR } from "@/lib/format";
+import { isDemoMode } from "@/server/env";
 import { can, currentAccess } from "@/server/access";
 import { sellerProblems, storedLines, type BuyerSnapshot, type SellerSnapshot } from "@/server/billing";
 import { getInvoice, getWorkspace } from "@/server/queries";
@@ -31,9 +33,9 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         {problems.length ? <ul className="notice error-notice">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul> : <p className="muted">Issuing freezes the lines, your business details and the customer&apos;s details, and gives the next number in this financial year.</p>}
         <div className="form-actions">
           {editable && <ActionButton action={issueInvoiceAction.bind(null, invoice.id, invoice.version)} label="Issue invoice" pendingLabel="Issuing…" confirmText="Issue this invoice? It cannot be edited afterwards." />}
-          {can(access, "payments.cash") && invoice.totalPaise > 0 && <ActionButton variant="secondary" action={recordFullPaymentAction.bind(null, invoice.id)} label={`Cash received, ${formatINR(invoice.totalPaise)}`} pendingLabel="Recording…" confirmText="Issue the invoice and record full cash payment?" />}
         </div>
-      </section></>;
+      </section>
+      {can(access, "payments.cash") && invoice.totalPaise > 0 && <section className="panel"><div className="panel-title"><h2>Paid on the spot?</h2><span>Records cash and issues the invoice in one step</span></div><RecordPaymentForm invoiceId={invoice.id} duePaise={invoice.totalPaise} allowNonCash={false} draft /></section>}</>;
   }
 
   const seller = sellerFromSnapshot(invoice.sellerSnapshot as SellerSnapshot | null, { name: workspace.legalName ?? workspace.name, brandName: workspace.brandName });
@@ -41,11 +43,17 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const legacy = Boolean((invoice.sellerSnapshot as SellerSnapshot | null)?.legacy);
   const open = invoice.balance.due > 0 && invoice.status === "SENT";
   return <><PageHeader eyebrow={`Invoice for ${invoice.customer.name}`} title={invoice.number ?? "Invoice"} action={<div className="form-actions no-print"><PrintButton /><Status value={invoice.displayStatus} /></div>} />
-    {open && <section className="panel no-print"><div className="panel-title"><h2>{formatINR(invoice.balance.due)} to collect</h2><span>Share a link or record what you received</span></div><div className="form-actions">
-      {can(access, "payments.request") && <ActionButton action={createPaymentRequestAction.bind(null, invoice.id)} label="Payment link" pendingLabel="Preparing…" linkLabel="Payment link for the customer" whatsappText={`Invoice ${invoice.number} from ${workspace.brandName}:`} />}
-      {can(access, "portal.share") && <ActionButton variant="secondary" action={sharePortalLinkAction.bind(null, { invoiceId: invoice.id })} label="Invoice link" pendingLabel="Preparing…" linkLabel="Private invoice link, valid 30 days" whatsappText={`Invoice ${invoice.number} from ${workspace.brandName}:`} />}
-      {can(access, "payments.cash") && <ActionButton variant="secondary" action={recordFullPaymentAction.bind(null, invoice.id)} label="Record full payment" pendingLabel="Recording…" confirmText={`Record ${formatINR(invoice.balance.due)} received?`} />}
-    </div></section>}
+    {open && <section className="panel no-print"><div className="panel-title"><h2>{formatINR(invoice.balance.due)} to collect</h2><span>{invoice.paymentRequests[0] ? `Payment link ${invoice.paymentRequests[0].status.toLowerCase()}` : "Share a link or record what you received"}</span></div><div className="form-actions">
+      {can(access, "payments.request") && <ActionButton action={createPaymentRequestAction.bind(null, invoice.id)} label={isDemoMode() ? "Payment link (demo)" : "Payment link"} pendingLabel="Preparing…" linkLabel={isDemoMode() ? "Demo: the customer sees the invoice; no money is collected." : "Send this to the customer: invoice with a Razorpay pay button"} whatsappText={`Invoice ${invoice.number} from ${workspace.brandName}, ${formatINR(invoice.balance.due)} due:`} />}
+      {can(access, "portal.share") && <ActionButton variant="secondary" action={sharePortalLinkAction.bind(null, { invoiceId: invoice.id })} label="Invoice link only" pendingLabel="Preparing…" linkLabel="Private invoice link, valid 30 days" whatsappText={`Invoice ${invoice.number} from ${workspace.brandName}:`} />}
+    </div>
+      {can(access, "payments.cash") && <div style={{ marginTop: 16 }}><RecordPaymentForm invoiceId={invoice.id} duePaise={invoice.balance.due} allowNonCash={can(access, "payments.manual")} draft={false} /></div>}
+    </section>}
+    {can(access, "ledger.view") && invoice.payments.length > 0 && <section className="panel no-print"><div className="panel-title"><h2>Payments</h2><span>{formatINR(invoice.balance.paid)} received{invoice.balance.refundDue ? `, ${formatINR(invoice.balance.refundDue)} to refund` : ""}</span></div>
+      <ul className="card-list">{invoice.payments.map((payment) => <li key={payment.id}><div className="card-row"><div><strong>{payment.receiptNumber ?? (payment.entryKind === "RECEIPT" ? "Opening balance" : payment.entryKind === "REVERSAL" ? "Reversal" : "Refund")}</strong><span>{formatDate(payment.occurredAt)} · {payment.method?.toLowerCase() ?? "earlier record"}{payment.reference ? ` · ${payment.reference}` : ""}{payment.recordedBy ? ` · ${payment.recordedBy.name ?? payment.recordedBy.email}` : ""}{payment.reason ? ` · ${payment.reason}` : ""}</span></div>
+        <div className="row-end"><strong>{formatINR(payment.amountPaise)}</strong><span className="form-actions">{payment.receiptNumber && <Link className="text-link-ink" href={`/invoices/${invoice.id}/receipts/${payment.id}`}>Receipt</Link>}{payment.entryKind === "RECEIPT" && payment.source === "MANUAL" && !payment.reversal && can(access, "payments.correct") && <ReverseReceiptButton paymentId={payment.id} invoiceId={invoice.id} />}</span></div></div></li>)}</ul>
+      {invoice.balance.refundDue > 0 && can(access, "payments.correct") && <div style={{ marginTop: 14 }}><RefundForm invoiceId={invoice.id} refundDuePaise={invoice.balance.refundDue} /></div>}
+    </section>}
     <DocumentView title={invoice.documentType === "BILL_OF_SUPPLY" ? "Bill of Supply" : "Tax Invoice"} number={invoice.number} issued={invoice.issueDate} due={invoice.dueDate} seller={seller} buyer={buyer} placeOfSupply={invoice.placeOfSupply} lines={lines} terms={invoice.paymentTerms} legacy={legacy}
       heads={{ subtotal: invoice.subtotalPaise, cgst: invoice.cgstPaise, sgst: invoice.sgstPaise, igst: invoice.igstPaise, tax: invoice.taxPaise, total: invoice.totalPaise }}
       footer={invoice.documentType === "BILL_OF_SUPPLY" ? <p className="muted">{seller.gstin ? "Composition taxable person, not eligible to collect tax on supplies." : "Supplier not registered under GST. No GST charged."}</p> : null} />

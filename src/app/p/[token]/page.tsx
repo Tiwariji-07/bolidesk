@@ -5,6 +5,7 @@ import { calculateDocument } from "@/domain/gst";
 import { formatDay, formatINR } from "@/lib/format";
 import { storedLines, type BuyerSnapshot, type SellerSnapshot } from "@/server/billing";
 import { resolvePortalToken } from "@/server/portal";
+import { getPrisma } from "@/server/prisma";
 import { getWorkspace, invoiceBalance } from "@/server/queries";
 
 export const metadata: Metadata = { title: "Your document", referrer: "no-referrer", robots: { index: false, follow: false } };
@@ -17,12 +18,17 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
   const workspace = await getWorkspace(portal.workspaceId);
   const { invoice, quote } = portal;
   if (invoice && invoice.status !== "DRAFT") {
-    const balance = invoiceBalance(invoice);
+    const [payments, request] = await Promise.all([
+      getPrisma().payment.findMany({ where: { invoiceId: invoice.id }, select: { amountPaise: true } }),
+      getPrisma().paymentRequest.findFirst({ where: { invoiceId: invoice.id, status: "ACTIVE", expiresAt: { gt: new Date() } }, select: { url: true } }),
+    ]);
+    const balance = invoiceBalance({ ...invoice, payments });
     const seller = sellerFromSnapshot(invoice.sellerSnapshot as SellerSnapshot | null, { name: workspace.legalName ?? workspace.name, brandName: workspace.brandName });
     return <main id="main-content" className="portal-page"><section className="portal-wide">
-      <p className="eyebrow">{workspace.brandName}</p><h1>{invoice.status === "PAID" ? "Paid, thank you" : `${formatINR(balance.due)} due`}</h1>
-      <p>Hello {portal.customer.name}. {invoice.status === "PAID" ? "We have received your payment." : invoice.dueDate ? `Please pay by ${formatDay(invoice.dueDate)}.` : ""}</p>
-      {invoice.paymentUrl && balance.due > 0 && !invoice.paymentUrl.includes("/p/") && <p><a className="button-link" href={invoice.paymentUrl} rel="noreferrer">Pay {formatINR(balance.due)} securely</a></p>}
+      <p className="eyebrow">{workspace.brandName}</p><h1>{balance.due === 0 ? "Paid, thank you" : `${formatINR(balance.due)} due`}</h1>
+      <p>Hello {portal.customer.name}. {balance.due === 0 ? "We have received your payment." : invoice.dueDate ? `Please pay by ${formatDay(invoice.dueDate)}.` : ""}</p>
+      {balance.due > 0 && request?.url && <p><a className="button-link" href={request.url} rel="noreferrer">Pay {formatINR(balance.due)} by UPI, card or net banking</a></p>}
+      {balance.due > 0 && request && !request.url && <p className="notice">Demo payment link: no money is collected in demo mode.</p>}
       <DocumentView title={invoice.documentType === "BILL_OF_SUPPLY" ? "Bill of Supply" : "Tax Invoice"} number={invoice.number} issued={invoice.issueDate} due={invoice.dueDate} seller={seller} buyer={buyerFromSnapshot(invoice.buyerSnapshot as BuyerSnapshot | null, { name: portal.customer.name })} placeOfSupply={invoice.placeOfSupply} lines={storedLines(invoice.linesJson)} terms={invoice.paymentTerms} heads={{ subtotal: invoice.subtotalPaise, cgst: invoice.cgstPaise, sgst: invoice.sgstPaise, igst: invoice.igstPaise, tax: invoice.taxPaise, total: invoice.totalPaise }} />
       <p className="muted">This private link expires {formatDay(portal.expiresAt)}.</p>
     </section></main>;

@@ -2,7 +2,7 @@ import { localJobNoteParser } from "../../domain/job-note";
 import { readEnvironment, type AppEnvironment } from "../env";
 import { OpenAiStructuredJobParser } from "./openai";
 import { RazorpayProvider } from "./razorpay";
-import type { DeliveryResult, Fetcher, JobParserProvider, MessagingProvider, PaymentLinkInput, PaymentLinkResult, PaymentProvider } from "./types";
+import type { DeliveryResult, Fetcher, JobParserProvider, MessagingProvider, PaymentLinkInput, PaymentLinkResult, PaymentLinkState, PaymentProvider, PaymentWebhookEvent } from "./types";
 import { WhatsAppCloudProvider } from "./whatsapp";
 
 class DemoJobParser implements JobParserProvider {
@@ -16,11 +16,15 @@ class DemoMessagingProvider implements MessagingProvider {
   async sendTemplate(input: { to: string; template: { name: string; languageCode: string; components?: unknown[] } }): Promise<DeliveryResult> { return { providerMessageId: `demo-${Date.now()}`, payload: { type: "template", ...input } }; }
 }
 
+/** Demo links have no payable URL; nothing is collected and no status ever changes from them. */
 class DemoPaymentProvider implements PaymentProvider {
   readonly name = "demo" as const;
-  async createPaymentLink(input: PaymentLinkInput): Promise<PaymentLinkResult> { return { id: `demo-${input.reference}`, url: input.callbackUrl }; }
+  async createPaymentLink(input: PaymentLinkInput): Promise<PaymentLinkResult> { return { id: `demo_${input.reference}`, url: null }; }
+  async findPaymentLink(): Promise<PaymentLinkState | null> { return null; }
+  async fetchPaymentLink(id: string): Promise<PaymentLinkState> { return { id, reference: null, status: "created", amount: 0, url: null, payments: [] }; }
+  async cancelPaymentLink() {}
   verifyWebhook(): boolean { return false; }
-  paymentLinkIdFromWebhook(): string | null { return null; }
+  parseWebhook(): PaymentWebhookEvent { return { kind: "ignored" }; }
 }
 
 export type Providers = { jobParser: JobParserProvider; messaging: MessagingProvider; payments: PaymentProvider };
