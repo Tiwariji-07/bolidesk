@@ -50,8 +50,7 @@ async function main() {
   await moveQuote(owner, raviQuote.id, "ACCEPTED");
   const raviDraft = await convertQuote(owner, raviQuote.id);
   await saveInvoiceDraft(owner, { id: raviDraft.id, version: raviDraft.version, dueDate: addDays(today, -7), lines: [{ description: "AC service", quantity: 2, unitPrice: "650", taxRate: 18, code: "998719" }, { description: "Capacitor", quantity: 1, unitPrice: "950", taxRate: 18, code: "998719" }] });
-  const raviInvoice = await issueInvoice(owner, { id: raviDraft.id, version: raviDraft.version + 1 });
-  await createFollowUp(owner, { subject: `${raviInvoice.number} · Ravi Sharma`, action: "Send a payment reminder with the link.", dueAt: new Date() });
+  await issueInvoice(owner, { id: raviDraft.id, version: raviDraft.version + 1 });
 
   // Aman: annual maintenance, invoiced and paid.
   const amanJob = await saveJob(owner, { note: "Aman Verma, annual AC maintenance at 4,500, GST 18%", customerId: aman.id }, parser);
@@ -65,6 +64,7 @@ async function main() {
   const meeraJob = await saveJob(owner, { note: "Meera Nair, split AC installation at 10,000, copper piping at Rs 1,800, GST 18%", customerId: meera.id }, parser);
   const meeraQuote = await createQuoteFromJob(owner, meeraJob.job.id);
   await moveQuote(owner, meeraQuote.id, "SENT", meeraQuote.version);
+  await createFollowUp(owner, { subject: "Meera Nair · installation quote", action: "Call to ask if she wants to go ahead this week.", dueAt: new Date() });
 
   await prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
   console.log("Seeded the CoolCare demo workspace.");

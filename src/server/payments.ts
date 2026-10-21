@@ -27,7 +27,8 @@ async function balanceInTx(tx: Tx, invoiceId: string, totalPaise: number): Promi
 }
 
 /**
- * After any ledger or credit change: derive the status from the balance, and mark a live payment link stale if it no longer asks for the amount due. Returns links to cancel after commit.
+ * After any ledger or credit change: derive the status from the balance, close or reopen the invoice's
+ * automatic follow-up, and mark a live payment link stale if it no longer asks for the amount due. Returns links to cancel after commit.
  */
 export async function settleInTx(tx: Tx, invoiceId: string): Promise<{ balance: Balance; staleRequestIds: string[] }> {
   const invoice = await tx.invoice.findUniqueOrThrow({ where: { id: invoiceId } });
@@ -36,6 +37,9 @@ export async function settleInTx(tx: Tx, invoiceId: string): Promise<{ balance: 
   if (status !== invoice.status) {
     await tx.invoice.update({ where: { id: invoiceId }, data: { status, paidAt: status === "PAID" ? invoice.paidAt ?? new Date() : null, version: { increment: 1 } } });
   }
+  if (balance.due === 0) await tx.followUp.updateMany({ where: { invoiceId, status: { in: ["OPEN", "SNOOZED"] } }, data: { status: "DONE", completedAutomatically: true } });
+  // A reversal that leaves money owed reopens the reminder a payment had closed.
+  else await tx.followUp.updateMany({ where: { invoiceId, status: "DONE", completedAutomatically: true }, data: { status: "OPEN", completedAutomatically: false } });
   const live = await tx.paymentRequest.findMany({ where: { invoiceId, status: { in: ["PENDING", "ACTIVE"] } } });
   const stale = live.filter((request) => request.amountPaise !== balance.due);
   if (stale.length) await tx.paymentRequest.updateMany({ where: { id: { in: stale.map((request) => request.id) } }, data: { status: "CANCELLING" } });

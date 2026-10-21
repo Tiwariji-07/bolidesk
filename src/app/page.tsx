@@ -2,10 +2,12 @@ import Link from "next/link";
 import { PageHeader, Status } from "@/components/ui";
 import { formatDate, formatINR, formatTime } from "@/lib/format";
 import { currentAccess } from "@/server/access";
+import { ensureOverdueFollowUps } from "@/server/followups";
 import { listActivities, listInvoices, listQuotes } from "@/server/queries";
 
 export default async function Dashboard() {
   const access = await currentAccess();
+  await ensureOverdueFollowUps(access.workspaceId);
   const [invoices, quotes, activities] = await Promise.all([listInvoices(access.workspaceId), listQuotes(access.workspaceId), listActivities(access.workspaceId)]);
   const open = invoices.filter((invoice) => invoice.balance.due > 0 && invoice.status === "SENT");
   const overdue = open.filter((invoice) => invoice.displayStatus === "OVERDUE");

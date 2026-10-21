@@ -292,6 +292,7 @@ model Invoice {
   buyerSnapshot Json?
   paidAt      DateTime?
   creditNote  CreditNote?
+  followUp    FollowUp?
   payments    Payment[]
   paymentRequests PaymentRequest[]
   deliveryLogs DeliveryLog[]
@@ -343,11 +344,16 @@ model FollowUp {
   id          String         @id @default(cuid())
   workspaceId String
   workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  /** Set for the automatic "invoice overdue" follow-up; unique, so it is created once per invoice. */
+  invoiceId   String?        @unique
+  invoice     Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   subject     String
   action      String
   status      FollowUpStatus @default(OPEN)
   dueAt       DateTime
   snoozedUntil DateTime?
+  /** Closed by a payment rather than by a person; reopened if the invoice becomes overdue again. */
+  completedAutomatically Boolean @default(false)
   createdAt   DateTime       @default(now())
   @@index([workspaceId, status, dueAt])
 }

@@ -2,11 +2,14 @@ import Link from "next/link";
 import { EmptyState, PageHeader, Status } from "@/components/ui";
 import { formatDay, formatINR } from "@/lib/format";
 import { currentAccess } from "@/server/access";
+import { ensureOverdueFollowUps } from "@/server/followups";
 import { storedLines } from "@/server/billing";
 import { listInvoices } from "@/server/queries";
 
 export default async function InvoicesPage() {
-  const invoices = await listInvoices((await currentAccess()).workspaceId);
+  const { workspaceId } = await currentAccess();
+  await ensureOverdueFollowUps(workspaceId);
+  const invoices = await listInvoices(workspaceId);
   const due = invoices.reduce((sum, invoice) => sum + invoice.balance.due, 0);
   return <><PageHeader eyebrow="Collect without chasing" title="Invoices" action={<Link className="button" href="/customers">+ New invoice</Link>} />
     <section className="panel"><div className="panel-title"><h2>Invoice register</h2><span>{formatINR(due)} to collect</span></div>
