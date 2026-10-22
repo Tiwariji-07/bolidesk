@@ -1,92 +1,93 @@
 # BoliDesk
 
-BoliDesk is a multi-tenant, local-first SaaS workspace for Indian service businesses. It turns a WhatsApp-style job note into a reviewed quote, invoice, payment request, and practical follow-up list. Every application request is scoped to the signed-in user's workspace membership; a workspace is never selected from browser input.
+BoliDesk is the billing desk for one Indian service shop with a small team (an owner, an office person and a few technicians). It turns a WhatsApp-style job note into an editable quote, a GST invoice, a payment link and a follow-up when the customer is late.
 
-The app starts in safe demo mode: data shown in the interface is sample data, payment links resolve to a local customer portal, and no external API call is made. Set `DEMO_MODE=false` only after the production credentials below are present and pass `npm run env:check`.
+Each shop is a workspace. Staff join it by invite and every page and action is limited to their role and their workspace.
 
-## Run locally
+## What it does
 
-Prerequisites: Node.js 22+, Docker Desktop, and npm.
+- **Jobs.** Type or paste a job note ("Ravi, 2 AC services at Rs 650, gas refill ₹2,500, GST 18%"). BoliDesk reads every item into draft lines. The office assigns the job to a technician and sets the visit time in IST.
+- **Quotes.** The draft is edited by a person before anything goes out. "Mark sent" numbers the quote and freezes its prices; accepting it creates a draft invoice.
+- **GST invoices.** Issuing an invoice recalculates it on the server, splits CGST and SGST (same state) or IGST (other state) per line, prints SAC/HSN codes and the place of supply, and freezes the seller's and buyer's details. Unregistered and composition shops get a bill of supply with no GST. Numbers follow GST Rule 46: one series per financial year, at most 16 characters, for example `BDI-2627-000001`.
+- **Payments.** Cash, UPI, card and bank receipts, part payments and Razorpay payment links. Every payment is a ledger row with its own receipt number; the invoice's paid status is derived from the ledger. Only the owner can reverse a receipt or record a refund.
+- **Credit notes.** An issued invoice is never edited. The owner cancels it with a numbered credit note that reverses its exact tax.
+- **WhatsApp.** "Open in WhatsApp" opens the customer's chat with a private invoice link filled in. With the WhatsApp Cloud API configured, invoices and reminders are sent as approved templates and their delivery status is tracked.
+- **Follow-ups.** An overdue invoice gets a reminder at 9:00 IST the day after it fell due. A payment closes it.
+- **Day book.** Money collected per day by method, invoices and credit notes issued with tax totals, money owed by days late, and a monthly sales register CSV in GSTR-1 column order.
+
+## Roles
+
+| | Owner | Office | Technician |
+|---|:-:|:-:|:-:|
+| Customers, jobs, draft quotes, cash payments | ✓ | ✓ | ✓ |
+| Assign jobs, send quotes, issue invoices, payment links, UPI/card/bank receipts, WhatsApp | ✓ | ✓ | |
+| Day book and payment history | ✓ | ✓ | |
+| Reverse receipts, refunds, credit notes, business settings, team | ✓ | | |
+
+Technicians can mark their own visits done and take cash on a draft invoice (it is issued first).
+
+## Run it locally
+
+You need Node.js 22+, Docker and npm.
 
 ```bash
 cp .env.example .env
-# Set SESSION_SECRET and DEMO_USER_PASSWORD to distinct local random values (both are required; do not commit them).
+# Set SESSION_SECRET (32+ random characters) and DEMO_USER_PASSWORD (12+ characters) in .env.
 docker compose up -d db
 npm ci
 npm run db:setup
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in with the seeded demo email (`DEMO_USER_EMAIL`, which defaults to `demo@bolidesk.local`) and the private `DEMO_USER_PASSWORD` you set in `.env`. The password is intentionally never committed or printed by setup commands. You can instead create a separate workspace from `/register`. The database commands are idempotent, so `npm run db:setup` can be repeated after a schema change. `npm run db:reset` drops and recreates the local database, then reruns the seed script.
+Open <http://localhost:3000> and sign in as `demo@bolidesk.local` with your `DEMO_USER_PASSWORD`. The demo shop "CoolCare Services" has customers, an overdue invoice, a paid invoice and a quote waiting for an answer.
 
-To run the full stack in containers, including migrations and demo data:
+`DEMO_MODE=true` (the default) never contacts Razorpay, WhatsApp or OpenAI. Payment links carry no payable URL and messages are only logged.
+
+The whole stack also runs in containers:
 
 ```bash
-docker compose up --build
+SESSION_SECRET=... DEMO_USER_PASSWORD=... docker compose up --build
 ```
 
-The application is available at [http://localhost:3000](http://localhost:3000). Stop containers with `docker compose down`; add `-v` only when you intentionally want to remove local Postgres data.
+## Checks
+
+```bash
+npm run typecheck
+npm run lint
+npm test                 # unit tests
+npm run test:db          # Postgres tests; uses TEST_DATABASE_URL, which is wiped
+npx playwright install chromium
+npm run test:e2e         # browser tests against the dev server and demo data
+npm run build
+```
+
+The database tests cover what mocks cannot prove: concurrent invoice numbering, the workspace lock, one live payment link per invoice, webhook deduplication, session revocation and cross-shop isolation.
 
 ## Database commands
 
 | Command | Purpose |
 | --- | --- |
-| `npm run db:generate` | Generate the Prisma client after schema changes. |
-| `npm run db:validate` | Validate the Prisma schema. |
-| `npm run db:migrate` | Create and apply a development migration. |
-| `npm run db:deploy` | Apply committed migrations, suitable for CI and containers. |
-| `npm run db:seed` | Upsert the CoolCare demo workspace. |
-| `npm run db:setup` | Generate, migrate, and seed in one step. |
-| `npm run db:reset` | Reset the local database and seed it again. |
+| `npm run db:deploy` | Apply migrations (production and CI). |
+| `npm run db:seed` | Create the demo shop. It only adds data to an empty demo workspace. |
+| `npm run db:setup` | Generate the client, migrate and seed. |
+| `npm run db:reset` | Drop the local database, migrate and seed again. |
 
-## Verification
+## Configuration
 
-```bash
-npm test
-npm run lint
-npm run build
-npx playwright install chromium
-npm run test:e2e
-```
+`npm run env:check` lists missing or unsafe settings by name and never prints values. A production server refuses to start while any are missing.
 
-The browser smoke test starts the development server, visits every app route, parses the sample job note, and creates a simulated payment request.
-
-## Environment
-
-Copy `.env.example` to `.env`. `DATABASE_URL` is required by Prisma and points at the Postgres service on your machine.
-
-| Variable | Required | Purpose |
+| Variable | When | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | Always | PostgreSQL connection string. |
-| `SESSION_SECRET` | Always | Random 32+ character server secret used to sign httpOnly sessions. |
-| `DEMO_USER_EMAIL` | Demo seed | Seed account email (defaults to `demo@bolidesk.local`). |
-| `DEMO_USER_PASSWORD` | Demo seed | Private 12+ character password used only to bcrypt-hash the seed account. Never commit or print it. |
-| `DEMO_MODE` | Always | Keep `true` to force non-network demo providers; set `false` for live adapters. |
-| `APP_URL` | Live mode | Public HTTPS application origin, used for customer portal callback URLs. |
-| `AI_PROVIDER` | Live mode | Must be `openai`. |
-| `OPENAI_API_KEY` / `OPENAI_MODEL` | Live mode / optional | OpenAI API credential and structured-parser model (`gpt-4.1-mini` default). |
-| `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` | Live mode | WhatsApp Cloud API credential and sending phone-number ID. |
-| `WHATSAPP_API_VERSION` | Optional | Graph API version (`v22.0` default). |
-| `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | WhatsApp inbound webhook | Secret chosen by you for Meta's verification handshake. |
-| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | Live mode | Razorpay API credentials for payment-link creation. |
-| `RAZORPAY_WEBHOOK_SECRET` | Live mode | Razorpay webhook secret used to verify the raw request HMAC. |
+| `SESSION_SECRET` | Always | 32+ random characters. |
+| `DEMO_MODE` | Always | `true` uses demo adapters; `false` requires every live credential below. |
+| `ALLOW_REGISTRATION` | Optional | `true` lets anyone create a new shop at `/register`. Leave `false` for a single-shop server; staff join by invite. |
+| `APP_URL` | Live | Public `https://` origin, used in customer links. |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET` | Live | Payment links and the signed payment webhook. |
+| `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_APP_SECRET`, `WHATSAPP_WEBHOOK_VERIFY_TOKEN` | Live | Sending templates and receiving signed delivery statuses. |
+| `WHATSAPP_TEMPLATE_INVOICE`, `WHATSAPP_TEMPLATE_REMINDER`, `WHATSAPP_TEMPLATE_LANGUAGE` | Optional | Template names (default `invoice_ready`, `payment_reminder`, `en`). |
+| `AI_PROVIDER`, `OPENAI_API_KEY`, `OPENAI_MODEL` | Live | Reads job notes into draft lines. Notes are sent to OpenAI. |
+| `DEMO_USER_EMAIL`, `DEMO_USER_PASSWORD` | Seed | Demo owner account. |
+| `TEST_DATABASE_URL` | Tests | Throwaway database for `npm run test:db`. |
 
-`npm run env:check` reports missing configuration by variable name only; it never prints secret values. The provider factory falls back to demo adapters if a credential is absent, preventing accidental external calls. Production deployment should still fail its release check when `env:check` reports issues.
-
-## Integrations and webhooks
-
-OpenAI parsing uses the Chat Completions structured JSON schema endpoint. WhatsApp deliveries are available through `POST /api/deliveries/whatsapp` with a scoped `invoiceId` and either `text` or `{ template: { name, languageCode, components? } }`. Every outcome, including failures, is persisted in `DeliveryLog`; API keys and message body secrets are not added to activity logs.
-
-Configure Razorpay to send `payment_link.paid` to:
-
-```text
-https://YOUR_APP_URL/api/webhooks/razorpay
-```
-
-The handler reads the unmodified body, verifies `x-razorpay-signature` against `RAZORPAY_WEBHOOK_SECRET`, finds the stored Razorpay payment-link ID, and marks only that request's workspace-scoped invoice paid. Duplicate Razorpay deliveries are safe: the invoice transition is idempotent and does not create a second paid activity.
-
-For WhatsApp Cloud API, configure the callback URL as `https://YOUR_APP_URL/api/webhooks/whatsapp` and enter the same `WHATSAPP_WEBHOOK_VERIFY_TOKEN` in Meta. The route implements Meta's `hub.challenge` verification and acknowledges delivery/status callbacks; inbound customer conversation handling is deliberately out of scope.
-
-Each payment request creates a 256-bit opaque customer-portal token. Only its SHA-256 hash is stored, and it expires after 30 days. Customers use `https://YOUR_APP_URL/p/<token>` to view their invoice or quote and follow the payment link; the portal has no workspace session and never accepts an invoice ID as authority.
-
-For deployment, set `DATABASE_URL`, all live variables above, and `APP_URL` to the externally reachable HTTPS origin. Run `npm run db:deploy`, then `npm run db:seed` only if demo data is desired. The provided Compose file intentionally stays in demo mode; a production service should inject secrets through its host's secret manager, run migrations once before application replicas start, and expose only the app and verified webhook URL.
+Deploying, Razorpay and WhatsApp setup, backups and the go-live checklist are in [docs/operations.md](docs/operations.md).

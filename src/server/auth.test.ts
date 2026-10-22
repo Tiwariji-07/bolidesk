@@ -1,72 +1,65 @@
+import bcrypt from "bcrypt";
 import { describe, expect, it } from "vitest";
-import { authenticateUser, createSessionToken, hashPassword, readSessionToken, registerWorkspaceOwner, resolveWorkspaceForUser } from "./auth";
+import { ROLE_PERMISSIONS, can } from "./access";
+import { authenticateUser, hashPassword, loginThrottle, passwordProblem, registerWorkspaceOwner } from "./auth";
 
-describe("session tokens", () => {
-  const secret = "test-session-secret-with-at-least-thirty-two-characters";
-
-  it("round-trips a signed user session", () => {
-    const token = createSessionToken({ userId: "user-a", issuedAt: 1_700_000_000, expiresAt: 1_700_086_400 }, secret);
-
-    expect(readSessionToken(token, secret, 1_700_000_001)).toEqual({ userId: "user-a", issuedAt: 1_700_000_000, expiresAt: 1_700_086_400 });
-  });
-
-  it("rejects a tampered or expired session", () => {
-    const token = createSessionToken({ userId: "user-a", issuedAt: 100, expiresAt: 200 }, secret);
-
-    expect(readSessionToken(`${token}x`, secret, 150)).toBeNull();
-    expect(readSessionToken(token, secret, 200)).toBeNull();
-  });
-});
-
-
-describe("password authentication", () => {
-  it("uses a bcrypt hash and only authenticates a matching email and password", async () => {
+describe("passwords", () => {
+  it("uses bcrypt and only authenticates a matching email and password", async () => {
     const passwordHash = await hashPassword("correct horse battery staple");
-    const db = {
-      user: {
-        findUnique: async ({ where }: { where: { email: string } }) => where.email === "owner@example.test"
-          ? { id: "user-a", email: "owner@example.test", passwordHash }
-          : null,
-      },
-    };
-
-    await expect(authenticateUser(db, "owner@example.test", "correct horse battery staple")).resolves.toEqual({ id: "user-a", email: "owner@example.test" });
+    const db = { user: { findUnique: async ({ where }: { where: { email: string } }) => where.email === "owner@example.test" ? { id: "user-a", email: "owner@example.test", passwordHash } : null } };
+    await expect(authenticateUser(db, " Owner@Example.Test ", "correct horse battery staple")).resolves.toEqual({ id: "user-a", email: "owner@example.test" });
     await expect(authenticateUser(db, "owner@example.test", "wrong password")).resolves.toBeNull();
     await expect(authenticateUser(db, "missing@example.test", "correct horse battery staple")).resolves.toBeNull();
     expect(passwordHash).toMatch(/^\$2[aby]\$/);
   });
-});
 
+  it("still signs in accounts whose password predates the 72-byte limit", async () => {
+    const legacy = "a".repeat(80);
+    const db = { user: { findUnique: async () => ({ id: "user-a", email: "old@example.test", passwordHash: await bcrypt.hash(legacy, 4) }) } };
+    await expect(authenticateUser(db, "old@example.test", legacy)).resolves.toMatchObject({ id: "user-a" });
+  });
+
+  it("refuses passwords bcrypt would silently truncate", async () => {
+    expect(passwordProblem("a".repeat(72))).toBeNull();
+    expect(passwordProblem("a".repeat(73))).toMatch(/72 bytes/);
+    expect(passwordProblem("पासवर्ड".repeat(4))).toMatch(/72 bytes/);
+    expect(passwordProblem("short")).toMatch(/12 characters/);
+    await expect(hashPassword("a".repeat(73))).rejects.toThrow();
+  });
+});
 
 describe("account registration", () => {
   it("creates a bcrypt-protected owner and membership atomically", async () => {
     const created: unknown[] = [];
     const db = {
-      $transaction: async <T>(callback: (tx: { user: { create: (input: { data: { email: string; passwordHash: string } }) => Promise<{ id: string; email: string }> }; workspace: { create: (input: { data: { name: string; brandName: string } }) => Promise<{ id: string }> }; membership: { create: (input: { data: { userId: string; workspaceId: string; role: "OWNER" } }) => Promise<unknown> } }) => Promise<T>) => callback({
-        user: { create: async ({ data }) => (created.push(data), { id: "user-a", email: data.email }) },
-        workspace: { create: async ({ data }) => (created.push(data), { id: "workspace-a" }) },
-        membership: { create: async ({ data }) => (created.push(data), data) },
-      }),
+      $transaction: async <T>(callback: (tx: never) => Promise<T>) => callback({
+        user: { create: async ({ data }: { data: { email: string } }) => (created.push(data), { id: "user-a", email: data.email }) },
+        workspace: { create: async ({ data }: { data: unknown }) => (created.push(data), { id: "workspace-a" }) },
+        membership: { create: async ({ data }: { data: unknown }) => (created.push(data), { id: "membership-a" }) },
+      } as never),
     };
-
-    await expect(registerWorkspaceOwner(db, { email: "Owner@Example.Test", password: "correct horse battery staple", workspaceName: "Acme Repairs" })).resolves.toEqual({ userId: "user-a", workspaceId: "workspace-a" });
+    await expect(registerWorkspaceOwner(db, { email: "Owner@Example.Test", password: "correct horse battery staple", workspaceName: "Acme Repairs" })).resolves.toEqual({ userId: "user-a", workspaceId: "workspace-a", membershipId: "membership-a" });
     expect(created).toContainEqual({ userId: "user-a", workspaceId: "workspace-a", role: "OWNER" });
     expect(created[0]).toMatchObject({ email: "owner@example.test", passwordHash: expect.stringMatching(/^\$2[aby]\$/) });
   });
 });
 
-describe("tenant resolution", () => {
-  it("derives the selected workspace only from an active membership", () => {
-    const memberships = [
-      { userId: "user-a", workspaceId: "workspace-a", role: "OWNER" as const },
-      { userId: "user-b", workspaceId: "workspace-b", role: "MEMBER" as const },
-    ];
-
-    expect(resolveWorkspaceForUser(memberships, "user-a")).toEqual({ workspaceId: "workspace-a", role: "OWNER" });
-    expect(resolveWorkspaceForUser(memberships, "user-a", "workspace-b")).toEqual({ workspaceId: "workspace-a", role: "OWNER" });
+describe("roles", () => {
+  it("gives technicians field work only and keeps settings and staff with the owner", () => {
+    expect(can({ role: "MEMBER" }, "payments.cash")).toBe(true);
+    expect(can({ role: "MEMBER" }, "invoices.write")).toBe(false);
+    expect(can({ role: "ADMIN" }, "payments.request")).toBe(true);
+    expect(can({ role: "ADMIN" }, "settings.write")).toBe(false);
+    expect(can({ role: "ADMIN" }, "staff.manage")).toBe(false);
+    for (const permission of ROLE_PERMISSIONS.ADMIN) expect(can({ role: "OWNER" }, permission)).toBe(true);
   });
+});
 
-  it("does not resolve a workspace for a user without a membership", () => {
-    expect(resolveWorkspaceForUser([], "user-a")).toBeNull();
+describe("login throttle", () => {
+  it("blocks an email after repeated failures and resets after the window", () => {
+    const now = 1_000_000;
+    for (let index = 0; index < 8; index += 1) loginThrottle.fail("x@example.test", now);
+    expect(loginThrottle.blocked("x@example.test", now)).toBe(true);
+    expect(loginThrottle.blocked("x@example.test", now + 16 * 60 * 1000)).toBe(false);
   });
 });

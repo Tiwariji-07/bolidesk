@@ -1,92 +1,73 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
+import { randomBytes } from "node:crypto";
+import { addDays, businessDate } from "../src/domain/business-time";
+import type { Access } from "../src/server/access";
 import { hashPassword } from "../src/server/auth";
+import { convertQuote, createQuoteFromJob, issueInvoice, moveQuote, saveInvoiceDraft, saveJob } from "../src/server/billing";
+import { createCustomer } from "../src/server/customers";
+import { createFollowUp } from "../src/server/followups";
+import { createProviders } from "../src/server/integrations/providers";
+import { recordPayment } from "../src/server/payments";
+import { getPrisma } from "../src/server/prisma";
+import { hashSessionToken } from "../src/server/session";
 
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) throw new Error("DATABASE_URL is required to seed BoliDesk.");
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
 const workspaceId = "demo-workspace";
 
-const line = (description: string, unitPrice: number) => [{ description, quantity: 1, unitPrice, taxRate: 18 }];
-
+/** Demo data goes through the same commands staff use, so numbers, totals and snapshots follow the real rules. */
 async function main() {
+  const prisma = getPrisma();
   await prisma.workspace.upsert({
     where: { id: workspaceId },
-    update: { name: "CoolCare Services", brandName: "CoolCare Services", invoicePrefix: "BD", gstin: "29AAAAA0000A1Z5" },
-    create: { id: workspaceId, name: "CoolCare Services", brandName: "CoolCare Services", invoicePrefix: "BD", gstin: "29AAAAA0000A1Z5" },
+    update: {},
+    create: { id: workspaceId, name: "CoolCare Services", brandName: "CoolCare Services", legalName: "CoolCare Services Private Limited", address: "14, 80 Feet Road, Indiranagar, Bengaluru 560038", stateCode: "29", gstScheme: "REGULAR", gstin: "29ABCDE1234F1ZW", defaultTaxRate: 18, defaultCode: "998719", invoicePrefix: "BD", upiId: "coolcare@okhdfcbank" },
   });
 
   const demoEmail = (process.env.DEMO_USER_EMAIL || "demo@bolidesk.local").trim().toLowerCase();
   const demoPassword = process.env.DEMO_USER_PASSWORD;
   if (!demoPassword || demoPassword.length < 12) throw new Error("DEMO_USER_PASSWORD must be set to at least 12 characters before seeding.");
-  const demoUser = await prisma.user.upsert({
-    where: { email: demoEmail },
-    update: { passwordHash: await hashPassword(demoPassword) },
-    create: { email: demoEmail, passwordHash: await hashPassword(demoPassword) },
-  });
-  await prisma.membership.upsert({
-    where: { userId_workspaceId: { userId: demoUser.id, workspaceId } },
-    update: { role: "OWNER" },
-    create: { userId: demoUser.id, workspaceId, role: "OWNER" },
-  });
+  const demoUser = await prisma.user.upsert({ where: { email: demoEmail }, update: { passwordHash: await hashPassword(demoPassword) }, create: { email: demoEmail, name: "Demo Owner", passwordHash: await hashPassword(demoPassword) } });
+  const membership = await prisma.membership.upsert({ where: { userId_workspaceId: { userId: demoUser.id, workspaceId } }, update: { role: "OWNER" }, create: { userId: demoUser.id, workspaceId, role: "OWNER" } });
 
-  const ravi = await prisma.customer.upsert({
-    where: { workspaceId_phone: { workspaceId, phone: "+91 98765 43210" } },
-    update: { name: "Ravi Sharma", address: "Indiranagar, Bengaluru" },
-    create: { id: "demo-customer-ravi", workspaceId, name: "Ravi Sharma", phone: "+91 98765 43210", address: "Indiranagar, Bengaluru" },
-  });
-  const meera = await prisma.customer.upsert({
-    where: { workspaceId_phone: { workspaceId, phone: "+91 99887 22110" } },
-    update: { name: "Meera Nair", address: "HSR Layout, Bengaluru" },
-    create: { id: "demo-customer-meera", workspaceId, name: "Meera Nair", phone: "+91 99887 22110", address: "HSR Layout, Bengaluru" },
-  });
-  const aman = await prisma.customer.upsert({
-    where: { workspaceId_phone: { workspaceId, phone: "+91 98100 11223" } },
-    update: { name: "Aman Verma", address: "Koramangala, Bengaluru" },
-    create: { id: "demo-customer-aman", workspaceId, name: "Aman Verma", phone: "+91 98100 11223", address: "Koramangala, Bengaluru" },
-  });
+  if (await prisma.customer.count({ where: { workspaceId } })) {
+    console.log("Demo workspace already has data; left it unchanged.");
+    return;
+  }
 
-  await prisma.job.upsert({
-    where: { id: "demo-job-ravi" },
-    update: { note: "Ravi Sharma, 2 AC services at 650 each, GST 18%, due 30 July 2026" },
-    create: { id: "demo-job-ravi", workspaceId, customerId: ravi.id, note: "Ravi Sharma, 2 AC services at 650 each, GST 18%, due 30 July 2026", parsedJson: { customerName: "Ravi Sharma", dueDate: "2026-07-30" } },
-  });
+  // A short-lived server-side session for the seed itself, revoked at the end.
+  const session = await prisma.session.create({ data: { tokenHash: hashSessionToken(randomBytes(32).toString("base64url")), membershipId: membership.id, expiresAt: new Date(Date.now() + 10 * 60_000) } });
+  const owner: Access = { sessionId: session.id, membershipId: membership.id, userId: demoUser.id, workspaceId, role: "OWNER", workspaceName: "CoolCare Services", email: demoEmail, name: "Demo Owner" };
+  const parser = createProviders({ env: { DEMO_MODE: true } as never }).jobParser;
+  const today = businessDate();
 
-  const quote = await prisma.quote.upsert({
-    where: { workspaceId_number: { workspaceId, number: "QT-1027" } },
-    update: { customerId: aman.id, status: "ACCEPTED", subtotal: 4500, tax: 810, total: 5310, linesJson: line("Annual AC maintenance", 4500) },
-    create: { id: "demo-quote-1027", workspaceId, customerId: aman.id, number: "QT-1027", status: "ACCEPTED", subtotal: 4500, tax: 810, total: 5310, linesJson: line("Annual AC maintenance", 4500) },
-  });
-  await prisma.quote.upsert({
-    where: { workspaceId_number: { workspaceId, number: "QT-1028" } },
-    update: { customerId: meera.id, status: "SENT", subtotal: 10000, tax: 1800, total: 11800, linesJson: line("Split AC installation", 10000) },
-    create: { id: "demo-quote-1028", workspaceId, customerId: meera.id, number: "QT-1028", status: "SENT", subtotal: 10000, tax: 1800, total: 11800, linesJson: line("Split AC installation", 10000) },
-  });
+  const ravi = await createCustomer(owner, { name: "Ravi Sharma", phone: "98765 43210", address: "Indiranagar, Bengaluru" });
+  const meera = await createCustomer(owner, { name: "Meera Nair", phone: "99887 22110", address: "HSR Layout, Bengaluru" });
+  const aman = await createCustomer(owner, { name: "Aman Verma", phone: "98100 11223", address: "Koramangala, Bengaluru" });
 
-  await prisma.invoice.upsert({
-    where: { workspaceId_number: { workspaceId, number: "BD-2047" } },
-    update: { customerId: aman.id, quoteId: quote.id, status: "SENT", subtotal: 3559, tax: 641, total: 4200, dueDate: new Date("2026-07-27T00:00:00.000Z"), linesJson: line("Annual AC maintenance", 3559) },
-    create: { id: "demo-invoice-2047", workspaceId, customerId: aman.id, quoteId: quote.id, number: "BD-2047", status: "SENT", subtotal: 3559, tax: 641, total: 4200, dueDate: new Date("2026-07-27T00:00:00.000Z"), linesJson: line("Annual AC maintenance", 3559) },
-  });
-  await prisma.invoice.upsert({
-    where: { workspaceId_number: { workspaceId, number: "BD-2048" } },
-    update: { customerId: ravi.id, status: "OVERDUE", subtotal: 2250, tax: 405, total: 2655, dueDate: new Date("2026-07-24T00:00:00.000Z"), linesJson: line("AC servicing & capacitor", 2250) },
-    create: { id: "demo-invoice-2048", workspaceId, customerId: ravi.id, number: "BD-2048", status: "OVERDUE", subtotal: 2250, tax: 405, total: 2655, dueDate: new Date("2026-07-24T00:00:00.000Z"), linesJson: line("AC servicing & capacitor", 2250) },
-  });
+  // Ravi: job -> quote -> accepted -> invoice issued, due last week (overdue).
+  const raviJob = await saveJob(owner, { note: "Ravi Sharma, 2 AC services at 650 each, 1 capacitor at 950, GST 18%", customerId: ravi.id }, parser);
+  const raviQuote = await createQuoteFromJob(owner, raviJob.job.id);
+  await moveQuote(owner, raviQuote.id, "SENT", raviQuote.version);
+  await moveQuote(owner, raviQuote.id, "ACCEPTED");
+  const raviDraft = await convertQuote(owner, raviQuote.id);
+  await saveInvoiceDraft(owner, { id: raviDraft.id, version: raviDraft.version, dueDate: addDays(today, -7), lines: [{ description: "AC service", quantity: 2, unitPrice: "650", taxRate: 18, code: "998719" }, { description: "Capacitor", quantity: 1, unitPrice: "950", taxRate: 18, code: "998719" }] });
+  await issueInvoice(owner, { id: raviDraft.id, version: raviDraft.version + 1 });
 
-  await prisma.followUp.upsert({
-    where: { id: "demo-follow-up-ravi" },
-    update: { subject: "BD-2048 · Ravi Sharma", action: "Send a payment reminder with the link.", status: "OPEN", dueAt: new Date("2026-07-26T09:00:00.000Z") },
-    create: { id: "demo-follow-up-ravi", workspaceId, subject: "BD-2048 · Ravi Sharma", action: "Send a payment reminder with the link.", status: "OPEN", dueAt: new Date("2026-07-26T09:00:00.000Z") },
-  });
-  await prisma.activity.upsert({
-    where: { id: "demo-activity-reminder" },
-    update: { body: "Payment reminder prepared for Ravi Sharma" },
-    create: { id: "demo-activity-reminder", workspaceId, body: "Payment reminder prepared for Ravi Sharma" },
-  });
+  // Aman: annual maintenance, invoiced and paid.
+  const amanJob = await saveJob(owner, { note: "Aman Verma, annual AC maintenance at 4,500, GST 18%", customerId: aman.id }, parser);
+  const amanQuote = await createQuoteFromJob(owner, amanJob.job.id);
+  await moveQuote(owner, amanQuote.id, "SENT", amanQuote.version);
+  await moveQuote(owner, amanQuote.id, "ACCEPTED");
+  const amanDraft = await convertQuote(owner, amanQuote.id);
+  await recordPayment(owner, { invoiceId: amanDraft.id, amount: "5,310", method: "CASH", idempotencyKey: "seed-aman-cash", draftVersion: amanDraft.version });
 
-  console.log("Seeded BoliDesk demo workspace.");
+  // Meera: installation quote sent and waiting.
+  const meeraJob = await saveJob(owner, { note: "Meera Nair, split AC installation at 10,000, copper piping at Rs 1,800, GST 18%", customerId: meera.id }, parser);
+  const meeraQuote = await createQuoteFromJob(owner, meeraJob.job.id);
+  await moveQuote(owner, meeraQuote.id, "SENT", meeraQuote.version);
+  await createFollowUp(owner, { subject: "Meera Nair · installation quote", action: "Call to ask if she wants to go ahead this week.", dueAt: new Date() });
+
+  await prisma.session.update({ where: { id: session.id }, data: { revokedAt: new Date() } });
+  console.log("Seeded the CoolCare demo workspace.");
 }
 
 main()
@@ -95,5 +76,5 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    await getPrisma().$disconnect();
   });
