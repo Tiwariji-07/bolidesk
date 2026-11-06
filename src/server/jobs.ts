@@ -22,7 +22,8 @@ export function setJobStatus(access: Access, jobId: string, status: Extract<JobS
     const job = await tx.job.findFirst({ where: { id: jobId, workspaceId: actor.workspaceId }, include: { customer: { select: { name: true } } } });
     if (!job) throw new UserError("Job not found.");
     const office = can({ role: actor.role! }, "jobs.assign");
-    if (!office && (status !== "DONE" || (job.assigneeUserId && job.assigneeUserId !== actor.userId))) throw new AccessError("Only the office can change someone else's job.");
+    // A technician closes only a visit given to them. An unassigned job is the office's to close or assign.
+    if (!office && (status !== "DONE" || job.assigneeUserId !== actor.userId)) throw new AccessError("Only the office can change someone else's job.");
     await tx.job.update({ where: { id: job.id }, data: { status: status === "OPEN" && job.scheduledAt ? "SCHEDULED" : status, doneAt: status === "DONE" ? new Date() : null } });
     await logActivity(tx, actor, `Job for ${job.customer?.name ?? "a customer"} marked ${status === "OPEN" ? "open again" : status.toLowerCase()}`);
   });
