@@ -42,11 +42,11 @@ export async function receivablesAgeing(workspaceId: string, at = new Date()) {
 /** Invoices issued before tax heads were stored keep their GST total but not its CGST/SGST/IGST split. */
 const unsplitGst = (invoice: { taxPaise: number; cgstPaise: number; sgstPaise: number; igstPaise: number }) => invoice.taxPaise - invoice.cgstPaise - invoice.sgstPaise - invoice.igstPaise;
 
-const csvCell = (value: string | number | null | undefined) => {
+export const csvCell = (value: string | number | null | undefined) => {
   const text = value === null || value === undefined ? "" : String(value);
   // Text starting with = + - @ would run as a formula in spreadsheet apps; plain numbers like -90.00 stay numbers.
   const safe = /^[=+\-@\t\r]/.test(text) && !/^-?\d+(?:\.\d+)?$/.test(text) ? `'${text}` : text;
-  return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 };
 const rupees = (paise: number) => (paise / 100).toFixed(2);
 
