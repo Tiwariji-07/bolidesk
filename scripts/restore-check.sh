@@ -6,7 +6,29 @@ set -euo pipefail
 
 dump="${1:?Pass the .dump file to check}"
 : "${SCRATCH_DATABASE_URL:?Set SCRATCH_DATABASE_URL to a throwaway database}"
-[ "${SCRATCH_DATABASE_URL%%\?*}" != "${DATABASE_URL:-}" ] || { echo "SCRATCH_DATABASE_URL must not be the live database" >&2; exit 1; }
+: "${DATABASE_URL:?Set DATABASE_URL to the live database, so the check can refuse to drop it}"
+
+# host:port/database, without user, password or query, so two spellings of one database compare equal.
+target() {
+  local u="${1%%\?*}"
+  u="${u#*://}"
+  u="${u##*@}"
+  local host="${u%%/*}" db="${u#*/}" port=5432
+  if [[ "$host" == \[* ]]; then
+    # IPv6 literal: [::1] or [::1]:5433. The colons inside the brackets are not a port.
+    [[ "$host" == *\]:* ]] && port="${host##*\]:}"
+    host="${host%%\]*}]"
+  elif [[ "$host" == *:* ]]; then
+    port="${host##*:}"
+    host="${host%:*}"
+  fi
+  host="${host,,}"
+  case "$host" in localhost|"[::1]") host=127.0.0.1 ;; esac
+  # Percent-decode the name: /boli%64esk is the database bolidesk.
+  db="$(printf '%b' "${db//%/\\x}")"
+  echo "$host:$port/$db"
+}
+[ "$(target "$SCRATCH_DATABASE_URL")" != "$(target "$DATABASE_URL")" ] || { echo "SCRATCH_DATABASE_URL must not be the live database" >&2; exit 1; }
 
 url="${SCRATCH_DATABASE_URL%%\?*}"
 name="${url##*/}"
