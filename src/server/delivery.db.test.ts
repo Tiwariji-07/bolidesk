@@ -61,6 +61,20 @@ describe("WhatsApp delivery (Postgres)", () => {
     expect(verifyMetaSignature(body, null, "app-secret")).toBe(false);
   });
 
+  it("keeps READ when read and delivered callbacks arrive together", async () => {
+    const { shop, invoice } = await issued();
+    await sendInvoiceMessage(shop.office, invoice.id, "invoice", fakeWhatsApp().provider);
+    const log = await getPrisma().deliveryLog.findFirstOrThrow({ where: { invoiceId: invoice.id } });
+    const callback = (status: string) => ({ entry: [{ changes: [{ value: { statuses: [{ id: log.providerMessageId, status }] } }] }] });
+    for (let round = 0; round < 10; round += 1) {
+      await getPrisma().deliveryLog.update({ where: { id: log.id }, data: { status: "SENT" } });
+      const [read, delivered] = await Promise.all([applyWhatsAppStatuses(callback("read")), applyWhatsAppStatuses(callback("delivered"))]);
+      expect(read).toBe(1);
+      expect(delivered).toBeLessThanOrEqual(1);
+      expect((await getPrisma().deliveryLog.findUniqueOrThrow({ where: { id: log.id } })).status).toBe("READ");
+    }
+  });
+
   it("sends one message when two people tap send at the same time", async () => {
     const { shop, invoice } = await issued();
     const whatsapp = fakeWhatsApp();

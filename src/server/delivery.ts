@@ -68,11 +68,11 @@ export async function applyWhatsAppStatuses(payload: unknown) {
   for (const status of parsed.data.entry.flatMap((entry) => entry.changes.flatMap((change) => change.value.statuses ?? []))) {
     const next = ({ sent: "SENT", delivered: "DELIVERED", read: "READ", failed: "FAILED" } as const)[status.status as "sent"];
     if (!next) continue;
-    const log = await getPrisma().deliveryLog.findUnique({ where: { providerMessageId: status.id } });
-    if (!log || statusRank[next] <= statusRank[log.status]) continue;
     const error = status.errors?.map((item) => item.message ?? item.title).filter(Boolean).join("; ");
-    await getPrisma().deliveryLog.update({ where: { id: log.id }, data: { status: next, ...(error ? { error: error.slice(0, 300) } : {}) } });
-    updated += 1;
+    // One conditional write, so a "delivered" callback that lands after "read" cannot move the status back.
+    const earlier = (Object.keys(statusRank) as (keyof typeof statusRank)[]).filter((name) => statusRank[name] < statusRank[next]);
+    const { count } = await getPrisma().deliveryLog.updateMany({ where: { providerMessageId: status.id, status: { in: earlier } }, data: { status: next, ...(error ? { error: error.slice(0, 300) } : {}) } });
+    updated += count;
   }
   return updated;
 }
