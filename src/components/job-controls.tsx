@@ -27,7 +27,7 @@ export function JobControls({ jobId, status, assigneeId, visit, members, office,
       <button className="secondary small" disabled={pending}>Save</button>
     </form>}
     <div className="form-actions">
-      {!closed && (office || mine || !assigneeId) && <button className="small" disabled={pending} onClick={() => run(() => setJobStatusAction(jobId, "DONE"))}>Visit done</button>}
+      {!closed && (office || mine) && <button className="small" disabled={pending} onClick={() => run(() => setJobStatusAction(jobId, "DONE"))}>Visit done</button>}
       {office && !closed && <button className="secondary small" disabled={pending} onClick={() => { if (confirm("Cancel this job?")) run(() => setJobStatusAction(jobId, "CANCELLED")); }}>Cancel job</button>}
       {office && closed && <button className="secondary small" disabled={pending} onClick={() => run(() => setJobStatusAction(jobId, "OPEN"))}>Reopen</button>}
     </div>

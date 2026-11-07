@@ -150,6 +150,18 @@ describe("payments ledger (Postgres)", () => {
     await expect(createPaymentRequest(shop.office, invoice.id, demo)).resolves.toMatchObject({ demo: true, url: null });
   });
 
+  it("replaces a demo link with a Razorpay link after the switch to live mode", async () => {
+    const { shop, invoice } = await issuedInvoice();
+    const demo = createProviders({ env: readEnvironment({ DEMO_MODE: "true" }) }).payments;
+    await expect(createPaymentRequest(shop.office, invoice.id, demo)).resolves.toMatchObject({ demo: true, url: null });
+    const razorpay = new FakeRazorpay();
+    const live = await createPaymentRequest(shop.office, invoice.id, razorpay);
+    expect(live).toMatchObject({ demo: false, url: [...razorpay.links.values()][0].url });
+    expect(live.url).toBeTruthy();
+    const requests = await db().paymentRequest.findMany({ where: { invoiceId: invoice.id }, orderBy: { createdAt: "asc" } });
+    expect(requests.map((request) => [request.provider, request.status])).toEqual([["DEMO", "CANCELLED"], ["RAZORPAY", "ACTIVE"]]);
+  });
+
   it("records a retried refund once", async () => {
     const { shop, invoice } = await issuedInvoice();
     await recordPayment(shop.office, { invoiceId: invoice.id, amount: "1180", method: "CASH", idempotencyKey: key() });

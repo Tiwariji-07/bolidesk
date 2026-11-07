@@ -35,6 +35,14 @@ describe("jobs (Postgres)", () => {
     await expect(setJobStatus(shop.technician, job.id, "DONE")).rejects.toThrow(/someone else's job/);
   });
 
+  it("stops a technician closing an unassigned job", async () => {
+    const shop = await makeShop();
+    const { job } = await saveJob(shop.office, { note: "AC service at the clinic" }, parser);
+    expect(job.assigneeUserId).toBeNull();
+    await expect(setJobStatus(shop.technician, job.id, "DONE")).rejects.toThrow(/someone else's job/);
+    expect((await getPrisma().job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("OPEN");
+  });
+
   it("gives a technician's own note to them", async () => {
     const shop = await makeShop();
     const { job } = await saveJob(shop.technician, { note: "Fridge gas leak at the dhaba" }, parser);

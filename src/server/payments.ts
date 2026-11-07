@@ -241,7 +241,9 @@ export async function createPaymentRequest(access: Access, invoiceId: string, pr
       const balance = await balanceInTx(tx, invoice.id, invoice.totalPaise);
       if (balance.due <= 0) throw new UserError("Nothing is due on this invoice.");
       const live = await tx.paymentRequest.findFirst({ where: { invoiceId: invoice.id, status: { in: [...LIVE] } } });
-      if (live?.status === "ACTIVE" && live.amountPaise === balance.due && live.expiresAt && live.expiresAt.getTime() > Date.now() + 60 * 60_000) {
+      // A demo link has no payable URL. After a switch to live mode it is cancelled below and replaced by a Razorpay link.
+      const sameProvider = provider.name !== "razorpay" || live?.provider === "RAZORPAY";
+      if (live?.status === "ACTIVE" && sameProvider && live.amountPaise === balance.due && live.expiresAt && live.expiresAt.getTime() > Date.now() + 60 * 60_000) {
         const portal = await createPortalToken(tx, { workspaceId: actor.workspaceId, customerId: invoice.customerId, invoiceId: invoice.id, expiresAt: live.expiresAt });
         return { kind: "ready" as const, url: live.url, portalUrl: portal.url };
       }

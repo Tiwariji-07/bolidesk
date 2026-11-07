@@ -86,10 +86,11 @@ Once a month, prove a backup restores:
 ```bash
 docker run --rm --network host -v "$PWD/scripts:/scripts:ro" -v "$PWD/backups:/backups" \
   -e SCRATCH_DATABASE_URL=postgresql://bolidesk:bolidesk@127.0.0.1:5433/bolidesk_restore_check \
+  -e DATABASE_URL="$DATABASE_URL" \
   postgres:16-alpine bash /scripts/restore-check.sh /backups/daily/<latest>.dump
 ```
 
-It restores into a scratch database, prints row counts and checks that every paid invoice is covered by its payments.
+The script stops if `DATABASE_URL` is missing or names the same host, port and database as `SCRATCH_DATABASE_URL`. It restores into a scratch database, prints row counts and checks that every paid invoice is covered by its payments.
 
 ## 7. Monitoring
 
